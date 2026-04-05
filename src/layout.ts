@@ -26,8 +26,10 @@ export function calcGameLayout(): GameLayout {
   const W = window.innerWidth;
   const H = window.innerHeight;
 
-  // Bottom section: label(20) + preview(44) + buttons(36) + exam(34) + padding(14) + gaps(15)
-  const bottomH = 163;
+  // Landscape phone: compact single-row bottom (~45px)
+  // Portrait/desktop: full bottom (~163px)
+  const landscape = W > H;
+  const bottomH = (landscape && H < 500) ? 50 : 163;
   const topH = 64; // top bar 38 + panel header 26
   const panelW = W / 2 - 14; // each panel width
   const listH = H - topH - bottomH;

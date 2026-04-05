@@ -372,8 +372,8 @@ function renderLevel() {
   const validList = el('div', 'caterpillar-list');
   validList.id = 'valid-list';
   if (gameLayout.panelCols > 1) {
-    validList.style.flexWrap = 'wrap';
-    validList.style.flexDirection = 'column';
+    validList.style.display = 'grid';
+    validList.style.gridTemplateColumns = 'repeat(2, 1fr)';
     validList.style.alignContent = 'space-evenly';
   }
   for (const seq of state.validHistory) {
@@ -389,8 +389,8 @@ function renderLevel() {
   const invalidList = el('div', 'caterpillar-list');
   invalidList.id = 'invalid-list';
   if (gameLayout.panelCols > 1) {
-    invalidList.style.flexWrap = 'wrap';
-    invalidList.style.flexDirection = 'column';
+    invalidList.style.display = 'grid';
+    invalidList.style.gridTemplateColumns = 'repeat(2, 1fr)';
     invalidList.style.alignContent = 'space-evenly';
   }
   for (const seq of state.invalidHistory) {
@@ -408,8 +408,8 @@ function renderLevel() {
 
   app.appendChild(container);
 
-  if (state.mode === 'game') renderGameInput();
-  else renderExam();
+  renderGameInput();
+  if (state.mode === 'exam') renderExam();
 }
 
 // ——— Game Input ———
@@ -450,24 +450,31 @@ function renderGameInput() {
   bottom.appendChild(examBtn);
 }
 
+let previewAnim: { destroy: () => void } | null = null;
+
 function updateInputPreview() {
   const wrapper = document.getElementById('input-preview');
   if (!wrapper) return;
 
+  // Destroy previous animation before creating new one
+  if (previewAnim) {
+    previewAnim.destroy();
+    previewAnim = null;
+  }
   wrapper.innerHTML = '';
+
+  if (state.inputChain.length === 0) return;
 
   let eyeDir: EyeDirection = 'right';
   let mood: Mood = 'sad';
-  if (state.inputChain.length > 0 && state.currentRule && state.currentRule(state.inputChain)) {
+  if (state.currentRule && state.currentRule(state.inputChain)) {
     eyeDir = 'left';
     mood = 'happy';
   }
 
-  if (state.inputChain.length > 0) {
-    const anim = createAnimatedCaterpillar(state.inputChain, gameLayout.previewW, gameLayout.previewH, eyeDir, mood);
-    wrapper.appendChild(anim.canvas);
-    state.animatedInstances.push(anim);
-  }
+  // Use static canvas for instant response, no animation overhead
+  const canvas = createCaterpillarCanvas(state.inputChain, gameLayout.previewW, gameLayout.previewH, eyeDir, mood);
+  wrapper.appendChild(canvas);
 }
 
 function addColor(c: number) {
@@ -561,10 +568,25 @@ function startExam() {
   renderExam();
 }
 
+function getOrCreateOverlay(): HTMLElement {
+  let overlay = document.getElementById('overlay');
+  if (!overlay) {
+    overlay = el('div', 'overlay');
+    overlay.id = 'overlay';
+    document.getElementById('app')!.appendChild(overlay);
+  }
+  overlay.innerHTML = '';
+  overlay.style.display = 'flex';
+  return overlay;
+}
+
+function removeOverlay() {
+  const overlay = document.getElementById('overlay');
+  if (overlay) { overlay.style.display = 'none'; overlay.innerHTML = ''; }
+}
+
 function renderExam() {
-  const bottom = document.getElementById('bottom-section');
-  if (!bottom) { renderLevel(); return; }
-  bottom.innerHTML = '';
+  const overlay = getOrCreateOverlay();
 
   if (state.examIndex >= state.examQuestions.length) {
     handleExamPass();
@@ -573,22 +595,20 @@ function renderExam() {
 
   const q = state.examQuestions[state.examIndex];
 
-  // Progress bar
   const progressWrap = el('div', 'exam-progress-wrap');
   const progressBar = el('div', 'exam-progress-bar');
   progressBar.style.width = `${(state.examIndex / state.examQuestions.length) * 100}%`;
   progressWrap.appendChild(progressBar);
-  bottom.appendChild(progressWrap);
+  overlay.appendChild(progressWrap);
 
   const label = el('div', 'exam-label', `${state.examIndex} / ${state.examQuestions.length}`);
-  bottom.appendChild(label);
+  overlay.appendChild(label);
 
-  // Animated caterpillar for exam question
   const preview = el('div', 'exam-caterpillar');
   const anim = createAnimatedCaterpillar(q.seq, gameLayout.previewW, gameLayout.previewH);
   preview.appendChild(anim.canvas);
   state.animatedInstances.push(anim);
-  bottom.appendChild(preview);
+  overlay.appendChild(preview);
 
   const btnRow = el('div', 'exam-buttons');
 
@@ -600,7 +620,7 @@ function renderExam() {
   invalidBtn.addEventListener('click', () => answerExam(false));
   btnRow.appendChild(invalidBtn);
 
-  bottom.appendChild(btnRow);
+  overlay.appendChild(btnRow);
 }
 
 function answerExam(answeredValid: boolean) {
@@ -610,12 +630,12 @@ function answerExam(answeredValid: boolean) {
   if (isCorrect) {
     playValid();
     state.examIndex++;
-    flashBottom('correct');
+    flashOverlay('correct');
     setTimeout(() => renderExam(), 300);
   } else {
     // Only add mistakes to samples — this is the learning moment
     playWrong();
-    flashBottom('wrong');
+    flashOverlay('wrong');
     if (state.currentRule!(q.seq)) {
       addToHistory(state.validHistory, q.seq, 'valid-list', 'left', 'happy');
     } else {
@@ -625,15 +645,14 @@ function answerExam(answeredValid: boolean) {
   }
 }
 
-function flashBottom(type: 'correct' | 'wrong') {
-  const bottom = document.getElementById('bottom-section');
-  if (!bottom) return;
-  bottom.classList.add(`flash-${type}`);
-  setTimeout(() => bottom.classList.remove(`flash-${type}`), 400);
+function flashOverlay(type: 'correct' | 'wrong') {
+  const overlay = document.getElementById('overlay');
+  if (!overlay) return;
+  overlay.classList.add(`flash-${type}`);
+  setTimeout(() => overlay.classList.remove(`flash-${type}`), 400);
 }
 
 function handleExamPass() {
-  // Stars: 3 = first attempt, 2 = second attempt, 1 = third+
   let stars = 1;
   if (state.examAttempts <= 1) stars = 3;
   else if (state.examAttempts <= 2) stars = 2;
@@ -651,12 +670,8 @@ function handleExamPass() {
 
   playSuccess();
 
-  // Victory screen
-  const bottom = document.getElementById('bottom-section')!;
-  bottom.innerHTML = '';
-  bottom.classList.add('victory');
+  const overlay = getOrCreateOverlay();
 
-  // Confetti
   const app = document.getElementById('app')!;
   launchConfetti(app, 3000);
 
@@ -667,47 +682,44 @@ function handleExamPass() {
     star.style.animationDelay = `${s * 0.2}s`;
     starsEl.appendChild(star);
   }
-  bottom.appendChild(starsEl);
+  overlay.appendChild(starsEl);
 
   const msg = el('div', 'victory-text', 'Level Complete!');
-  bottom.appendChild(msg);
+  overlay.appendChild(msg);
 
-  // Rule reveal
   const reveal = el('div', 'rule-reveal');
   const revealTitle = el('div', 'reveal-title', 'The rule was:');
   reveal.appendChild(revealTitle);
   const revealText = el('div', 'reveal-text', ruleDescriptions[state.currentLevel]);
   reveal.appendChild(revealText);
-  bottom.appendChild(reveal);
+  overlay.appendChild(reveal);
 
-  // Stats
   const stats = el('div', 'victory-stats');
   stats.innerHTML = `Caterpillars tested: <strong>${state.testedCount}</strong> &middot; Exam attempts: <strong>${state.examAttempts}</strong>`;
-  bottom.appendChild(stats);
+  overlay.appendChild(stats);
 
   const nextBtn = el('button', 'next-level-btn');
   if (state.currentLevel < 19) {
     nextBtn.textContent = 'Next Level \u2192';
-    nextBtn.addEventListener('click', () => { playClick(); startLevel(state.currentLevel + 1); });
+    nextBtn.addEventListener('click', () => { removeOverlay(); playClick(); startLevel(state.currentLevel + 1); });
   } else {
     nextBtn.textContent = 'Back to Levels';
-    nextBtn.addEventListener('click', () => { playClick(); goToChooser(); });
+    nextBtn.addEventListener('click', () => { removeOverlay(); playClick(); goToChooser(); });
   }
-  bottom.appendChild(nextBtn);
+  overlay.appendChild(nextBtn);
 }
 
 function handleExamFail() {
   state.mode = 'game';
   playWrong();
 
-  const bottom = document.getElementById('bottom-section')!;
-  bottom.innerHTML = '';
+  const overlay = getOrCreateOverlay();
 
   const msg = el('div', 'exam-result fail');
   msg.innerHTML = '<div class="result-icon">\u{1F914}</div><div class="result-text">Not quite! Keep exploring.</div>';
-  bottom.appendChild(msg);
+  overlay.appendChild(msg);
 
-  setTimeout(() => renderGameInput(), 1800);
+  setTimeout(() => { removeOverlay(); renderGameInput(); }, 1800);
 }
 
 // ——— Help ———
