@@ -1,12 +1,15 @@
-// Main game — redesigned with juice, path map, victory screen, sounds
+// Caterpillar Code — write Python one-liners to capture hidden rules
 
 import { rules, type RuleFunc } from './rules';
 import { getValidInvalid, getN, type Sequence } from './utils';
-import { createAnimatedCaterpillar, createIdleCaterpillar, COLORS, type EyeDirection, type Mood } from './caterpillar';
+import { createAnimatedCaterpillar, createIdleCaterpillar, createCaterpillarCanvas, COLORS, type EyeDirection, type Mood } from './caterpillar';
 import { ruleDescriptions } from './ruleDescriptions';
 import { launchConfetti } from './confetti';
 import { playClick, playPop, playValid, playInvalid, playSuccess, playWrong, playBackspace } from './sounds';
 import { calcGameLayout, calcChooserLayout, type GameLayout } from './layout';
+import { initSignatures, ALL_SEQS, buildSignature, compareSignatures, isConsistentWithExamples } from './signatures';
+import { evaluateExpression, isPyodideReady } from './pyodide';
+import { getStars, MAX_CODE_LENGTH, STAR_THRESHOLDS } from './starThresholds';
 
 let gameLayout: GameLayout = calcGameLayout();
 
@@ -15,8 +18,7 @@ type Screen = 'chooser' | 'level' | 'help';
 interface LevelProgress {
   passed: boolean;
   stars: number;       // 1-3
-  attempts: number;    // exam attempts
-  tested: number;      // caterpillars tested before passing
+  bestLength: number;  // shortest passing expression length
 }
 
 interface GameState {
@@ -29,16 +31,16 @@ interface GameState {
   validHistory: Sequence[];
   invalidHistory: Sequence[];
   inputChain: number[];
-  mode: 'game' | 'exam';
-  examQuestions: { seq: Sequence; isValid: boolean }[];
-  examIndex: number;
-  examAttempts: number;
+  codeInput: string;
+  codeError: string | null;
+  codeSubmitting: boolean;
   testedCount: number;
   animatedInstances: { destroy: () => void }[];
   isTutorial: boolean;
   tutorialStep: number;
   tutorialSeenValid: boolean;
   tutorialSeenInvalid: boolean;
+  cheatSheetOpen: boolean;
 }
 
 const state: GameState = {
@@ -51,41 +53,31 @@ const state: GameState = {
   validHistory: [],
   invalidHistory: [],
   inputChain: [],
-  mode: 'game',
-  examQuestions: [],
-  examIndex: 0,
-  examAttempts: 0,
+  codeInput: '',
+  codeError: null,
+  codeSubmitting: false,
   testedCount: 0,
   animatedInstances: [],
   isTutorial: false,
   tutorialStep: 0,
   tutorialSeenValid: false,
   tutorialSeenInvalid: false,
+  cheatSheetOpen: false,
 };
 
 function loadProgress(): Map<number, LevelProgress> {
   try {
-    const s = localStorage.getItem('caterpillar-progress-v2');
+    const s = localStorage.getItem('caterpillar-code-progress');
     if (s) {
       const arr: [number, LevelProgress][] = JSON.parse(s);
       return new Map(arr);
-    }
-    // Migrate from old format
-    const old = localStorage.getItem('caterpillar-progress');
-    if (old) {
-      const ids: number[] = JSON.parse(old);
-      const map = new Map<number, LevelProgress>();
-      for (const id of ids) {
-        map.set(id, { passed: true, stars: 1, attempts: 1, tested: 0 });
-      }
-      return map;
     }
   } catch { /* ignore */ }
   return new Map();
 }
 
 function saveProgress() {
-  localStorage.setItem('caterpillar-progress-v2', JSON.stringify([...state.progress.entries()]));
+  localStorage.setItem('caterpillar-code-progress', JSON.stringify([...state.progress.entries()]));
 }
 
 function seqKey(s: Sequence): string {
@@ -117,8 +109,9 @@ function toRGB(c: [number, number, number]): string {
 
 let idleStaggerCounter = 0;
 
-function renderCaterpillarItem(chain: Sequence, eyeDir: EyeDirection = 'forward', mood: Mood = 'neutral'): HTMLElement {
+function renderCaterpillarItem(chain: Sequence, eyeDir: EyeDirection = 'forward', mood: Mood = 'neutral', id?: string): HTMLElement {
   const wrapper = el('div', 'caterpillar-item');
+  if (id) wrapper.id = id;
   const idle = createIdleCaterpillar(chain, gameLayout.catW, gameLayout.catH, eyeDir, mood, idleStaggerCounter++);
   wrapper.appendChild(idle.canvas);
   state.animatedInstances.push(idle);
@@ -134,7 +127,6 @@ function segColorCSS(i: number): string {
 }
 
 function segColorDimCSS(i: number): string {
-  // Opaque dim: mix segment color at 25% with background (#0f0e17)
   const c = COLORS[i % 4];
   const bg: [number, number, number] = [0.059, 0.055, 0.09];
   const r = Math.round((c[0] * 0.25 + bg[0] * 0.75) * 255);
@@ -197,13 +189,9 @@ function renderChooserPortrait(path: HTMLElement, L: { segW: number; segH: numbe
 
   const gap = Math.round(L.segW * 0.05);
   const colTemplate = Array.from({ length: COLS }, () => `${L.segW}px`).join(` ${gap}px `);
-  // Horizontal connector: from center to center, thick like body
   const connW = gap + L.segW;
-  const connH = L.segH; // full body height
+  const connH = L.segH;
   const connMargin = -Math.round(L.segW * 0.5);
-  // Vertical bend: from center of upper seg to center of lower seg
-  // bendH covers the gap between rows + half seg on each side
-  // margin pulls it back into the segments by half segH
   const bendH = Math.round(L.segH * 2.0);
   const bendMargin = -Math.round(L.segH * 0.5);
 
@@ -254,11 +242,9 @@ function renderChooserLandscape(path: HTMLElement, L: { segW: number; segH: numb
 
   const gap = Math.round(L.segH * 0.05);
   const rowTemplate = Array.from({ length: ROWS }, () => `${L.segH}px`).join(` ${gap}px `);
-  // Vertical connectors: full body width, center-to-center height
-  const vConnW = L.segW; // full body width
+  const vConnW = L.segW;
   const vConnH = gap + L.segH;
   const vConnMargin = -Math.round(L.segH * 0.5);
-  // Horizontal bend: from center of left seg to center of right seg
   const hBendW = Math.round(L.segW * 2.0);
   const hBendMargin = -Math.round(L.segW * 0.5);
 
@@ -305,9 +291,9 @@ function renderChooser() {
   const app = document.getElementById('app')!;
   const container = el('div', 'chooser-screen');
 
-  const title = el('h1', 'game-title', 'Caterpillar Logic');
+  const title = el('h1', 'game-title', 'Caterpillar Code');
   container.appendChild(title);
-  const subtitle = el('p', 'game-subtitle', 'An inductive reasoning puzzle game');
+  const subtitle = el('p', 'game-subtitle', 'Write Python one-liners to crack the rules');
   container.appendChild(subtitle);
 
   const L = calcChooserLayout();
@@ -359,9 +345,9 @@ const TUTORIAL_HINTS: TutorialHintDef[] = [
   { text: 'Watch the caterpillar\u2019s face \u2014 it smiles if it\u2019s valid, frowns if it\u2019s not. Try both!' },
   // 4: Explain the + button (auto-advances on submit)
   { text: 'Press + to save a caterpillar to your board. This helps you compare and spot the pattern.' },
-  // 5: Free exploration + exam hint (dynamic text)
+  // 5: Free exploration + code hint
   { text: '' },
-  // 6: Exam in progress — no hint
+  // 6: Code submission in progress — no hint
   { text: '' },
 ];
 
@@ -372,9 +358,9 @@ function startTutorial() {
   state.tutorialSeenInvalid = false;
   state.currentLevel = -1;
   state.currentRule = TUTORIAL_RULE;
-  state.mode = 'game';
   state.inputChain = [];
-  state.examAttempts = 0;
+  state.codeInput = '';
+  state.codeError = null;
   state.testedCount = 0;
 
   state.valids = TUTORIAL_VALID;
@@ -405,7 +391,7 @@ function renderTutorialHint() {
   if (step === 5) {
     text = state.testedCount < 2
       ? 'Try saving a few more caterpillars to spot the pattern.'
-      : 'Keep exploring, or take the exam when you\u2019re ready.';
+      : 'When you think you know the rule, write a Python expression below. For example: len(set(c))==1';
   }
   if (!text) return;
 
@@ -425,14 +411,13 @@ function renderTutorialHint() {
     hint.appendChild(nextBtn);
   }
 
-  // Insert at top of bottom-section (inline, no fixed positioning)
   const bottom = document.getElementById('bottom-section');
   if (bottom) {
     bottom.prepend(hint);
   }
 }
 
-function advanceTutorial(action: 'addColor' | 'submit' | 'startExam') {
+function advanceTutorial(action: 'addColor' | 'submit' | 'startCode') {
   if (!state.isTutorial) return;
   const step = state.tutorialStep;
 
@@ -443,32 +428,14 @@ function advanceTutorial(action: 'addColor' | 'submit' | 'startExam') {
     state.tutorialStep = 3;
     renderTutorialHint();
   } else if (step === 4 && action === 'submit') {
-    // After first save, move to free exploration
     state.tutorialStep = 5;
     renderTutorialHint();
   } else if (step === 5 && action === 'submit') {
     renderTutorialHint();
-  } else if ((step === 4 || step === 5) && action === 'startExam') {
+  } else if ((step === 4 || step === 5) && action === 'startCode') {
     state.tutorialStep = 6;
     removeTutorialHint();
   }
-}
-
-function handleTutorialExamFail() {
-  state.mode = 'game';
-  playWrong();
-
-  const overlay = getOrCreateOverlay();
-  const msg = el('div', 'exam-result fail');
-  msg.innerHTML = '<div class="result-icon">\u{1F914}</div><div class="result-text">Not quite \u2014 keep exploring!</div>';
-  overlay.appendChild(msg);
-
-  setTimeout(() => {
-    removeOverlay();
-    renderGameInput();
-    state.tutorialStep = 5;
-    renderTutorialHint();
-  }, 1800);
 }
 
 function handleTutorialPass() {
@@ -488,6 +455,9 @@ function handleTutorialPass() {
   reveal.appendChild(revealText);
   overlay.appendChild(reveal);
 
+  const codeReveal = el('div', 'code-reveal', `Your solution: ${state.codeInput}`);
+  overlay.appendChild(codeReveal);
+
   const readyMsg = el('div', 'tutorial-ready-msg', "You're ready for the real puzzles!");
   overlay.appendChild(readyMsg);
 
@@ -506,9 +476,10 @@ function handleTutorialPass() {
 function startLevel(levelId: number) {
   state.currentLevel = levelId;
   state.currentRule = rules[levelId];
-  state.mode = 'game';
   state.inputChain = [];
-  state.examAttempts = 0;
+  state.codeInput = '';
+  state.codeError = null;
+  state.codeSubmitting = false;
   state.testedCount = 0;
 
   const { valid, invalid } = getValidInvalid(state.currentRule);
@@ -535,7 +506,6 @@ function renderLevel() {
   topBar.appendChild(backBtn);
   const levelLabel = el('span', 'level-label', state.isTutorial ? 'Tutorial' : `Level ${state.currentLevel + 1}`);
   topBar.appendChild(levelLabel);
-
 
   container.appendChild(topBar);
 
@@ -597,12 +567,12 @@ function renderLevel() {
   // Bottom section
   const bottomSection = el('div', 'bottom-section');
   bottomSection.id = 'bottom-section';
+
   container.appendChild(bottomSection);
 
   app.appendChild(container);
 
   renderGameInput();
-  if (state.mode === 'exam') renderExam();
 }
 
 // ——— Game Input ———
@@ -611,17 +581,14 @@ function renderGameInput() {
   const bottom = document.getElementById('bottom-section')!;
   bottom.innerHTML = '';
 
-  const label = el('div', 'input-label', 'Test your hypothesis:');
-  bottom.appendChild(label);
+  // Single row: preview + color buttons + action buttons
+  const builderRow = el('div', 'builder-row');
 
   const previewWrapper = el('div', 'input-preview');
   previewWrapper.id = 'input-preview';
-  bottom.appendChild(previewWrapper);
+  builderRow.appendChild(previewWrapper);
   updateInputPreview();
 
-  const controls = el('div', 'input-controls');
-
-  // Color buttons group
   const colorGroup = el('div', 'btn-group color-group');
   for (let c = 0; c < 4; c++) {
     const btn = el('button', 'color-btn');
@@ -629,9 +596,8 @@ function renderGameInput() {
     btn.addEventListener('click', () => { playClick(); addColor(c); });
     colorGroup.appendChild(btn);
   }
-  controls.appendChild(colorGroup);
+  builderRow.appendChild(colorGroup);
 
-  // Action buttons group (backspace + add)
   const actionGroup = el('div', 'btn-group action-group');
   const bksp = el('button', 'action-btn backspace-btn', '\u232b');
   bksp.addEventListener('click', () => { playBackspace(); backspace(); });
@@ -640,14 +606,404 @@ function renderGameInput() {
   okBtn.title = 'Add to samples';
   okBtn.addEventListener('click', () => submitChain());
   actionGroup.appendChild(okBtn);
-  controls.appendChild(actionGroup);
+  builderRow.appendChild(actionGroup);
 
-  // Exam button
-  const examBtn = el('button', 'exam-start-btn', '\u{1F9E0} Take the exam');
-  examBtn.addEventListener('click', () => { playClick(); startExam(); });
-  controls.appendChild(examBtn);
+  bottom.appendChild(builderRow);
 
-  bottom.appendChild(controls);
+  // ——— Code editor section ———
+  const codeSection = el('div', 'code-section');
+
+  const codeLabelRow = el('div', 'code-label-row');
+  const codeLabel = el('span', 'code-label', 'Python expression:');
+  codeLabelRow.appendChild(codeLabel);
+
+  // Cheat-sheet toggle
+  const cheatBtn = el('button', 'cheat-toggle-btn', '?');
+  cheatBtn.title = 'Show reference';
+  cheatBtn.addEventListener('click', () => {
+    state.cheatSheetOpen = !state.cheatSheetOpen;
+    const sheet = document.getElementById('cheat-sheet');
+    if (sheet) sheet.style.display = state.cheatSheetOpen ? 'block' : 'none';
+    cheatBtn.classList.toggle('active', state.cheatSheetOpen);
+  });
+  codeLabelRow.appendChild(cheatBtn);
+  codeSection.appendChild(codeLabelRow);
+
+  // Cheat-sheet panel
+  const cheatSheet = el('div', 'cheat-sheet');
+  cheatSheet.id = 'cheat-sheet';
+  cheatSheet.style.display = state.cheatSheetOpen ? 'block' : 'none';
+  // Color legend
+  const colorsRow = el('div', 'cheat-colors');
+  for (let ci = 0; ci < 4; ci++) {
+    const swatch = el('span', 'cheat-color');
+    swatch.style.background = toRGB(COLORS[ci]);
+    if (ci === 2) swatch.style.color = '#fff';
+    swatch.textContent = String(ci);
+    colorsRow.appendChild(swatch);
+  }
+  cheatSheet.appendChild(colorsRow);
+
+  const catW = 120;
+  const catH = 22;
+
+  const varsDiv = el('div', 'cheat-vars');
+
+  // c — color list: all 4 distinct colors, easy to read off
+  const cSeq = [0, 1, 2, 3];
+  const cRow = el('div', 'cheat-var-row');
+  cRow.innerHTML = '<code>c</code> \u2014 color list <span class="cheat-ex">[0, 1, 2, 3]</span>';
+  cRow.appendChild(createCaterpillarCanvas(cSeq, catW, catH, 'forward', 'neutral'));
+  varsDiv.appendChild(cRow);
+
+  // f — frequencies: repeated colors make counting obvious
+  const fSeq = [0, 0, 0, 1, 3];
+  const fRow = el('div', 'cheat-var-row');
+  fRow.innerHTML = '<code>f</code> \u2014 frequencies <span class="cheat-ex">{0:3, 1:1, 2:0, 3:1}</span>';
+  fRow.appendChild(createCaterpillarCanvas(fSeq, catW, catH, 'forward', 'neutral'));
+  varsDiv.appendChild(fRow);
+
+  // s — segments: clear runs of same color
+  const sSeq = [1, 1, 2, 2, 2, 3];
+  const sRow = el('div', 'cheat-var-row');
+  sRow.innerHTML = '<code>s</code> \u2014 segments <span class="cheat-ex">[(1,2),(2,3),(3,1)]</span>';
+  sRow.appendChild(createCaterpillarCanvas(sSeq, catW, catH, 'forward', 'neutral'));
+  varsDiv.appendChild(sRow);
+
+  cheatSheet.appendChild(varsDiv);
+
+  // Example expression with a matching caterpillar
+  const exampleDiv = el('div', 'cheat-example-row');
+  const exampleCatSeq = [0, 1, 2, 1, 0]; // 3 distinct colors — matches len(set(c))==3
+  exampleDiv.innerHTML = 'Example: <code>len(set(c))==3</code> <span class="cheat-ex">\u2014 exactly 3 distinct colors</span>';
+  exampleDiv.appendChild(createCaterpillarCanvas(exampleCatSeq, catW, catH, 'forward', 'happy'));
+  cheatSheet.appendChild(exampleDiv);
+
+  codeSection.appendChild(cheatSheet);
+
+  // Code input row
+  const codeInputRow = el('div', 'code-input-row');
+  const codeInput = el('input', 'code-input') as HTMLInputElement;
+  codeInput.type = 'text';
+  codeInput.placeholder = 'e.g. f[0] > f[1]';
+  codeInput.maxLength = MAX_CODE_LENGTH;
+  codeInput.value = state.codeInput;
+  codeInput.spellcheck = false;
+  codeInput.autocomplete = 'off';
+  codeInput.addEventListener('input', () => {
+    state.codeInput = codeInput.value;
+    state.codeError = null;
+    updateCharCounter();
+    updateErrorDisplay();
+  });
+  codeInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !state.codeSubmitting) {
+      e.preventDefault();
+      submitCode();
+    }
+  });
+  codeInputRow.appendChild(codeInput);
+
+  const charCounter = el('span', 'char-counter');
+  charCounter.id = 'char-counter';
+  codeInputRow.appendChild(charCounter);
+  codeSection.appendChild(codeInputRow);
+
+  // Error display
+  const errorDisplay = el('div', 'code-error');
+  errorDisplay.id = 'code-error';
+  codeSection.appendChild(errorDisplay);
+
+  // Submit button
+  const submitBtn = el('button', 'code-submit-btn', '\u25b6 Check solution');
+  submitBtn.id = 'code-submit-btn';
+  submitBtn.addEventListener('click', () => submitCode());
+  codeSection.appendChild(submitBtn);
+
+  bottom.appendChild(codeSection);
+
+  updateCharCounter();
+  updateErrorDisplay();
+}
+
+function updateCharCounter() {
+  const counter = document.getElementById('char-counter');
+  if (!counter) return;
+  const len = state.codeInput.length;
+  counter.textContent = `${len} / ${MAX_CODE_LENGTH}`;
+  counter.classList.toggle('near-limit', len > MAX_CODE_LENGTH * 0.85);
+  counter.classList.toggle('at-limit', len >= MAX_CODE_LENGTH);
+}
+
+function updateErrorDisplay() {
+  const errEl = document.getElementById('code-error');
+  if (!errEl) return;
+  if (state.codeError) {
+    errEl.innerHTML = '';
+    errEl.textContent = state.codeError;
+    errEl.style.display = 'flex';
+  } else {
+    errEl.innerHTML = '';
+    errEl.style.display = 'none';
+  }
+}
+
+// ——— Toast notification ———
+
+function showToast(text: string, duration = 2000) {
+  const existing = document.getElementById('toast');
+  if (existing) existing.remove();
+
+  const toast = el('div', 'toast', text);
+  toast.id = 'toast';
+  document.getElementById('app')!.appendChild(toast);
+  setTimeout(() => toast.classList.add('toast-visible'), 10);
+  setTimeout(() => {
+    toast.classList.remove('toast-visible');
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+}
+
+// ——— Code Submission ———
+
+async function submitCode() {
+  if (state.codeSubmitting) return;
+  const expr = state.codeInput.trim();
+  if (!expr) {
+    state.codeError = 'Enter a Python expression';
+    updateErrorDisplay();
+    return;
+  }
+  if (expr.length > MAX_CODE_LENGTH) {
+    state.codeError = `Expression too long (${expr.length} > ${MAX_CODE_LENGTH})`;
+    updateErrorDisplay();
+    return;
+  }
+
+  state.codeSubmitting = true;
+  state.codeError = null;
+  updateErrorDisplay();
+
+  const submitBtn = document.getElementById('code-submit-btn');
+  if (submitBtn) {
+    submitBtn.textContent = isPyodideReady() ? '\u23f3 Checking...' : '\u23f3 Loading Python...';
+    submitBtn.classList.add('submitting');
+  }
+
+  try {
+    // Determine which sequences to evaluate against
+    let seqs: number[][];
+    let ruleResults: boolean[];
+
+    if (state.isTutorial) {
+      // Tutorial: evaluate against tutorial valid+invalid sets
+      seqs = [...TUTORIAL_VALID, ...TUTORIAL_INVALID];
+      ruleResults = seqs.map(s => TUTORIAL_RULE(s));
+    } else {
+      // Real level: evaluate against ALL sequences
+      seqs = ALL_SEQS;
+      ruleResults = ALL_SEQS.map(s => state.currentRule!(s));
+    }
+
+    const evalResult = await evaluateExpression(expr, seqs);
+
+    // If ALL caterpillars threw exceptions — show error
+    if (evalResult.errorCount === seqs.length) {
+      showErrorWithCaterpillar(
+        'Your expression throws an error for every caterpillar',
+        seqs[evalResult.firstErrorIndex],
+      );
+      playWrong();
+      return;
+    }
+
+    // If SOME caterpillars threw exceptions — show where
+    if (evalResult.errorCount > 0) {
+      const errSeq = seqs[evalResult.firstErrorIndex];
+      showErrorWithCaterpillar(
+        `Your expression throws an error on ${evalResult.errorCount} caterpillar${evalResult.errorCount > 1 ? 's' : ''}`,
+        errSeq,
+      );
+      playWrong();
+      return;
+    }
+
+    const playerResults = evalResult.results as boolean[];
+
+    // Warn if expression is trivially always-true or always-false
+    const allTrue = playerResults.every(r => r);
+    const allFalse = playerResults.every(r => !r);
+    if (allTrue || allFalse) {
+      state.codeError = allTrue
+        ? 'Your expression is True for every caterpillar — probably a logic error (e.g. missing c== before a list?)'
+        : 'Your expression is False for every caterpillar — check your logic';
+      updateErrorDisplay();
+      playWrong();
+      return;
+    }
+
+    const playerSig = buildSignature(playerResults);
+    const ruleSig = buildSignature(ruleResults);
+
+    if (compareSignatures(playerSig, ruleSig)) {
+      // Correct!
+      if (state.isTutorial) {
+        handleTutorialPass();
+      } else {
+        handlePass();
+      }
+    } else {
+      // Wrong — provide feedback
+      handleWrongSubmission(playerResults, ruleResults, seqs);
+    }
+  } catch (_err: unknown) {
+    state.codeError = 'Syntax error';
+    updateErrorDisplay();
+    playWrong();
+  } finally {
+    state.codeSubmitting = false;
+    if (submitBtn) {
+      submitBtn.textContent = '\u25b6 Check solution';
+      submitBtn.classList.remove('submitting');
+    }
+  }
+}
+
+function handleWrongSubmission(playerResults: boolean[], ruleResults: boolean[], seqs: number[][]) {
+  // Check if consistent with visible examples first
+  const consistent = isConsistentWithExamples(playerResults, state.validHistory, state.invalidHistory);
+
+  if (consistent) {
+    showToast('Nice hypothesis!');
+    playPop();
+  } else {
+    playWrong();
+  }
+
+  // Find first mismatch
+  let mismatchIdx = -1;
+  for (let i = 0; i < playerResults.length; i++) {
+    if (playerResults[i] !== ruleResults[i]) {
+      mismatchIdx = i;
+      break;
+    }
+  }
+
+  if (mismatchIdx === -1) return; // shouldn't happen
+
+  const counterexample = seqs[mismatchIdx];
+  const isValid = ruleResults[mismatchIdx]; // what the rule says
+  const key = seqKey(counterexample);
+
+  // Check if already in history
+  const historyList = isValid ? state.validHistory : state.invalidHistory;
+  const listId = isValid ? 'valid-list' : 'invalid-list';
+  const existingIdx = historyList.findIndex(s => seqKey(s) === key);
+
+  if (existingIdx !== -1) {
+    // Already visible — highlight it
+    const listEl = document.getElementById(listId);
+    if (listEl) {
+      const items = listEl.querySelectorAll('.caterpillar-item');
+      const item = items[existingIdx] as HTMLElement | undefined;
+      if (item) {
+        item.classList.add('highlight-flash');
+        setTimeout(() => item.classList.remove('highlight-flash'), 1500);
+      }
+    }
+  } else {
+    // Not in history — add it
+    if (isValid) {
+      addToHistory(state.validHistory, counterexample, 'valid-list', 'forward', 'happy');
+    } else {
+      addToHistory(state.invalidHistory, counterexample, 'invalid-list', 'forward', 'sad');
+    }
+  }
+
+  // Show counterexample inline in error area
+  const playerSays = playerResults[mismatchIdx] ? 'valid' : 'invalid';
+  const actualIs = isValid ? 'valid' : 'invalid';
+  showErrorWithCaterpillar(
+    `Your code says "${playerSays}" \u2014 but it's ${actualIs}`,
+    counterexample,
+    isValid ? 'happy' : 'sad',
+  );
+}
+
+/** Show an error message with an inline caterpillar rendered next to it */
+function showErrorWithCaterpillar(message: string, seq: number[], mood: Mood = 'neutral') {
+  const errEl = document.getElementById('code-error');
+  if (!errEl) return;
+
+  errEl.innerHTML = '';
+  errEl.style.display = 'flex';
+
+  const textSpan = el('span', undefined, message);
+  errEl.appendChild(textSpan);
+
+  const canvas = createCaterpillarCanvas(seq, 100, 20, 'forward', mood);
+  canvas.classList.add('error-caterpillar');
+  errEl.appendChild(canvas);
+}
+
+function handlePass() {
+  const codeLen = state.codeInput.trim().length;
+  const stars = getStars(state.currentLevel, codeLen);
+
+  const existing = state.progress.get(state.currentLevel);
+  const bestStars = Math.max(existing?.stars ?? 0, stars);
+  const bestLength = Math.min(existing?.bestLength ?? Infinity, codeLen);
+
+  state.progress.set(state.currentLevel, {
+    passed: true,
+    stars: bestStars,
+    bestLength,
+  });
+  saveProgress();
+
+  playSuccess();
+
+  const overlay = getOrCreateOverlay();
+  const app = document.getElementById('app')!;
+  launchConfetti(app, 3000);
+
+  const starsEl = el('div', 'victory-stars');
+  for (let s = 0; s < 3; s++) {
+    const star = el('span', s < stars ? 'vstar filled' : 'vstar empty');
+    star.textContent = '\u2605';
+    star.style.animationDelay = `${s * 0.2}s`;
+    starsEl.appendChild(star);
+  }
+  overlay.appendChild(starsEl);
+
+  const msg = el('div', 'victory-text', 'Level Complete!');
+  overlay.appendChild(msg);
+
+  const reveal = el('div', 'rule-reveal');
+  const revealTitle = el('div', 'reveal-title', 'The rule was:');
+  reveal.appendChild(revealTitle);
+  const revealText = el('div', 'reveal-text', ruleDescriptions[state.currentLevel]);
+  reveal.appendChild(revealText);
+  overlay.appendChild(reveal);
+
+  const codeReveal = el('div', 'code-reveal');
+  codeReveal.innerHTML = `Your solution: <code>${state.codeInput.trim()}</code> <span class="code-length">(${codeLen} chars)</span>`;
+  overlay.appendChild(codeReveal);
+
+  const [threeMax, twoMax] = STAR_THRESHOLDS[state.currentLevel];
+  const thresholdHint = el('div', 'threshold-hint');
+  thresholdHint.innerHTML = `\u2605\u2605\u2605 \u2264 ${threeMax} chars &nbsp;\u00b7&nbsp; \u2605\u2605 \u2264 ${twoMax} chars`;
+  overlay.appendChild(thresholdHint);
+
+  const nextBtn = el('button', 'next-level-btn');
+  if (state.currentLevel < 19) {
+    nextBtn.textContent = 'Next Level \u2192';
+    nextBtn.addEventListener('click', () => { removeOverlay(); playClick(); startLevel(state.currentLevel + 1); });
+  } else {
+    nextBtn.textContent = 'Back to Levels';
+    nextBtn.addEventListener('click', () => { removeOverlay(); playClick(); goToChooser(); });
+  }
+  overlay.appendChild(nextBtn);
 }
 
 let previewAnim: { destroy: () => void } | null = null;
@@ -656,7 +1012,6 @@ function updateInputPreview() {
   const wrapper = document.getElementById('input-preview');
   if (!wrapper) return;
 
-  // Destroy previous animation before creating new one
   if (previewAnim) {
     previewAnim.destroy();
     previewAnim = null;
@@ -678,7 +1033,6 @@ function updateInputPreview() {
   if (state.isTutorial && state.tutorialStep === 3) {
     if (isValid) state.tutorialSeenValid = true;
     else state.tutorialSeenInvalid = true;
-    // Auto-advance to "explain +" step once both expressions seen
     if (state.tutorialSeenValid && state.tutorialSeenInvalid) {
       state.tutorialStep = 4;
       renderTutorialHint();
@@ -689,6 +1043,7 @@ function updateInputPreview() {
   previewAnim = anim;
   wrapper.appendChild(anim.canvas);
 }
+
 
 function addColor(c: number) {
   if (state.inputChain.length >= 7) return;
@@ -732,26 +1087,22 @@ function submitChain() {
   advanceTutorial('submit');
 }
 
-const MAX_HISTORY = 10;
-
 function addToHistory(history: Sequence[], seq: Sequence, listId: string, eyeDir: EyeDirection, mood: Mood) {
   const key = seqKey(seq);
   const idx = history.findIndex(s => seqKey(s) === key);
   if (idx !== -1) history.splice(idx, 1);
   history.unshift(seq);
 
-  // Cap at MAX_HISTORY — oldest drops off
-  while (history.length > MAX_HISTORY) history.pop();
+  // No cap — history grows without limit
 
   const listEl = document.getElementById(listId);
   if (!listEl) return;
 
-  // Animate new item in
   const item = renderCaterpillarItem(seq, eyeDir, mood);
   item.classList.add('slide-in');
   listEl.prepend(item);
 
-  // Remove excess DOM children
+  // Remove excess DOM children if history was deduplicated
   while (listEl.children.length > history.length) {
     listEl.removeChild(listEl.lastChild!);
   }
@@ -759,31 +1110,7 @@ function addToHistory(history: Sequence[], seq: Sequence, listId: string, eyeDir
   listEl.scrollTop = 0;
 }
 
-// ——— Exam: 15 perfect answers required ———
-
-function startExam() {
-  advanceTutorial('startExam');
-  state.mode = 'exam';
-  state.examAttempts++;
-
-  const total = state.isTutorial ? 5 : 15;
-  const validNum = state.isTutorial
-    ? Math.floor(Math.random() * 2) + 2  // 2-3 valid out of 5
-    : Math.floor(Math.random() * 6) + 5;
-  const invalidNum = total - validNum;
-
-  const validQs = getN(validNum, state.valids, state.validHistory).map(s => ({ seq: s, isValid: true }));
-  const invalidQs = getN(invalidNum, state.invalids, state.invalidHistory).map(s => ({ seq: s, isValid: false }));
-  const all = [...validQs, ...invalidQs];
-  for (let i = all.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [all[i], all[j]] = [all[j], all[i]];
-  }
-
-  state.examQuestions = all;
-  state.examIndex = 0;
-  renderExam();
-}
+// ——— Overlay helpers ———
 
 function getOrCreateOverlay(): HTMLElement {
   let overlay = document.getElementById('overlay');
@@ -800,144 +1127,6 @@ function getOrCreateOverlay(): HTMLElement {
 function removeOverlay() {
   const overlay = document.getElementById('overlay');
   if (overlay) { overlay.style.display = 'none'; overlay.innerHTML = ''; }
-}
-
-function renderExam() {
-  const overlay = getOrCreateOverlay();
-
-  if (state.examIndex >= state.examQuestions.length) {
-    if (state.isTutorial) { handleTutorialPass(); return; }
-    handleExamPass();
-    return;
-  }
-
-  const q = state.examQuestions[state.examIndex];
-
-  const progressWrap = el('div', 'exam-progress-wrap');
-  const progressBar = el('div', 'exam-progress-bar');
-  progressBar.style.width = `${(state.examIndex / state.examQuestions.length) * 100}%`;
-  progressWrap.appendChild(progressBar);
-  overlay.appendChild(progressWrap);
-
-  const label = el('div', 'exam-label', `${state.examIndex} / ${state.examQuestions.length}`);
-  overlay.appendChild(label);
-
-  const preview = el('div', 'exam-caterpillar');
-  const anim = createAnimatedCaterpillar(q.seq, gameLayout.previewW, gameLayout.previewH);
-  preview.appendChild(anim.canvas);
-  state.animatedInstances.push(anim);
-  overlay.appendChild(preview);
-
-  const btnRow = el('div', 'exam-buttons');
-
-  const validBtn = el('button', 'exam-btn valid-answer', '\u2714 Valid');
-  validBtn.addEventListener('click', () => answerExam(true));
-  btnRow.appendChild(validBtn);
-
-  const invalidBtn = el('button', 'exam-btn invalid-answer', '\u2718 Invalid');
-  invalidBtn.addEventListener('click', () => answerExam(false));
-  btnRow.appendChild(invalidBtn);
-
-  overlay.appendChild(btnRow);
-}
-
-function answerExam(answeredValid: boolean) {
-  const q = state.examQuestions[state.examIndex];
-  const isCorrect = q.isValid === answeredValid;
-
-  if (isCorrect) {
-    playValid();
-    state.examIndex++;
-    flashOverlay('correct');
-    setTimeout(() => renderExam(), 300);
-  } else {
-    // Only add mistakes to samples — this is the learning moment
-    playWrong();
-    flashOverlay('wrong');
-    if (state.currentRule!(q.seq)) {
-      addToHistory(state.validHistory, q.seq, 'valid-list', 'left', 'happy');
-    } else {
-      addToHistory(state.invalidHistory, q.seq, 'invalid-list', 'right', 'sad');
-    }
-    setTimeout(() => state.isTutorial ? handleTutorialExamFail() : handleExamFail(), 800);
-  }
-}
-
-function flashOverlay(type: 'correct' | 'wrong') {
-  const overlay = document.getElementById('overlay');
-  if (!overlay) return;
-  overlay.classList.add(`flash-${type}`);
-  setTimeout(() => overlay.classList.remove(`flash-${type}`), 400);
-}
-
-function handleExamPass() {
-  let stars = 1;
-  if (state.examAttempts <= 1) stars = 3;
-  else if (state.examAttempts <= 2) stars = 2;
-
-  const existing = state.progress.get(state.currentLevel);
-  const bestStars = Math.max(existing?.stars ?? 0, stars);
-
-  state.progress.set(state.currentLevel, {
-    passed: true,
-    stars: bestStars,
-    attempts: state.examAttempts,
-    tested: 0,
-  });
-  saveProgress();
-
-  playSuccess();
-
-  const overlay = getOrCreateOverlay();
-
-  const app = document.getElementById('app')!;
-  launchConfetti(app, 3000);
-
-  const starsEl = el('div', 'victory-stars');
-  for (let s = 0; s < 3; s++) {
-    const star = el('span', s < stars ? 'vstar filled' : 'vstar empty');
-    star.textContent = '\u2605';
-    star.style.animationDelay = `${s * 0.2}s`;
-    starsEl.appendChild(star);
-  }
-  overlay.appendChild(starsEl);
-
-  const msg = el('div', 'victory-text', 'Level Complete!');
-  overlay.appendChild(msg);
-
-  const reveal = el('div', 'rule-reveal');
-  const revealTitle = el('div', 'reveal-title', 'The rule was:');
-  reveal.appendChild(revealTitle);
-  const revealText = el('div', 'reveal-text', ruleDescriptions[state.currentLevel]);
-  reveal.appendChild(revealText);
-  overlay.appendChild(reveal);
-
-  const stats = el('div', 'victory-stats');
-  stats.innerHTML = `Exam attempts: <strong>${state.examAttempts}</strong>`;
-  overlay.appendChild(stats);
-
-  const nextBtn = el('button', 'next-level-btn');
-  if (state.currentLevel < 19) {
-    nextBtn.textContent = 'Next Level \u2192';
-    nextBtn.addEventListener('click', () => { removeOverlay(); playClick(); startLevel(state.currentLevel + 1); });
-  } else {
-    nextBtn.textContent = 'Back to Levels';
-    nextBtn.addEventListener('click', () => { removeOverlay(); playClick(); goToChooser(); });
-  }
-  overlay.appendChild(nextBtn);
-}
-
-function handleExamFail() {
-  state.mode = 'game';
-  playWrong();
-
-  const overlay = getOrCreateOverlay();
-
-  const msg = el('div', 'exam-result fail');
-  msg.innerHTML = '<div class="result-icon">\u{1F914}</div><div class="result-text">Not quite! Keep exploring.</div>';
-  overlay.appendChild(msg);
-
-  setTimeout(() => { removeOverlay(); renderGameInput(); }, 1800);
 }
 
 // ——— Help ———
@@ -965,7 +1154,7 @@ function showHelp() {
 
   const text = el('div', 'help-text');
   text.innerHTML = `
-    <p>Each level hides a secret <strong>rule</strong> about caterpillar color patterns. Your goal: figure out the rule!</p>
+    <p>Each level hides a secret <strong>rule</strong> about caterpillar color patterns. Your goal: figure out the rule and express it in Python!</p>
     <p>You start with examples: caterpillars on the <span class="hl-valid">left are valid</span> (match the rule) and on the <span class="hl-invalid">right are invalid</span> (don't match).</p>
     <p>Build your own caterpillars to test hypotheses. Watch the face:</p>
     <ul>
@@ -973,9 +1162,15 @@ function showHelp() {
       <li><strong>Frowns</strong> = invalid</li>
     </ul>
     <p>Press <strong>+</strong> to save a caterpillar to your board for comparison.</p>
-    <p>When you're confident, take the <strong>exam</strong> — classify 15 caterpillars correctly in a row. One mistake and you're back to exploring.</p>
-    <p>After passing, the rule is <strong>revealed</strong>. Earn up to 3 stars based on how many attempts it takes!</p>
-    <p class="help-inspired">Inspired by <em>Zendo</em> and <em>Eleusis</em> — classic inductive reasoning games.</p>
+    <p>When you're confident, write a <strong>Python boolean expression</strong> that captures the rule. You have three variables:</p>
+    <ul>
+      <li><code>c</code> \u2014 color list, e.g. <code>[0, 1, 1, 2, 3]</code></li>
+      <li><code>f</code> \u2014 color frequencies, e.g. <code>{0:1, 1:2, 2:1, 3:1}</code></li>
+      <li><code>s</code> \u2014 run-length segments, e.g. <code>[(0,1),(1,2),(2,1),(3,1)]</code></li>
+    </ul>
+    <p>Your expression must return <code>True</code> for valid caterpillars and <code>False</code> for invalid ones.</p>
+    <p>Earn up to <strong>3 stars</strong> based on how short your expression is \u2014 the shorter, the better!</p>
+    <p class="help-inspired">Inspired by <em>Zendo</em> and <em>Eleusis</em> \u2014 classic inductive reasoning games.</p>
   `;
   container.appendChild(text);
 
@@ -984,8 +1179,9 @@ function showHelp() {
 
 function goToChooser() {
   state.screen = 'chooser';
-  state.mode = 'game';
   state.inputChain = [];
+  state.codeInput = '';
+  state.codeError = null;
   state.isTutorial = false;
   removeTutorialHint();
   renderChooser();
@@ -994,6 +1190,7 @@ function goToChooser() {
 // ——— Init ———
 
 export function init() {
+  initSignatures();
   renderChooser();
 
   // Re-render on orientation change

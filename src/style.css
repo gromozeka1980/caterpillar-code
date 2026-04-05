@@ -484,7 +484,7 @@ html, body {
 
 .caterpillar-list {
   flex: 1;
-  overflow: hidden;
+  overflow-y: auto;
   padding: 4px 4px;
   display: flex;
   flex-direction: column;
@@ -524,22 +524,25 @@ html, body {
   flex-shrink: 0;
 }
 
-.input-label {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  letter-spacing: 0.5px;
+.builder-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
 }
 
 .input-preview {
-  min-height: 44px;
+  min-height: 36px;
+  min-width: 100px;
+  flex: 1;
+  max-width: 200px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: rgba(255,255,255,0.03);
   border-radius: 10px;
-  padding: 2px 10px;
-  width: 100%;
-  max-width: 300px;
+  padding: 2px 6px;
   transition: background 0.25s;
 }
 .input-preview.preview-valid {
@@ -551,14 +554,6 @@ html, body {
 
 .input-preview canvas {
   max-width: 100%;
-}
-
-.input-controls {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: center;
-  gap: 8px;
 }
 
 .btn-group {
@@ -618,108 +613,282 @@ html, body {
   transform: scale(0.92);
 }
 
-.exam-start-btn {
-  padding: 7px 16px;
-  font-size: 0.8rem;
+
+/* ——— Code Editor ——— */
+
+.code-section {
+  width: 100%;
+  max-width: 600px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.code-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.code-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
+.cheat-toggle-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--surface-light);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cheat-toggle-btn:hover, .cheat-toggle-btn.active {
+  border-color: var(--gold);
+  color: var(--gold);
+  background: rgba(251, 191, 36, 0.08);
+}
+
+/* Cheat-sheet panel */
+.cheat-sheet {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  animation: popIn 0.2s ease-out;
+}
+
+.cheat-colors {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.cheat-color {
+  width: 24px;
+  height: 20px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: rgba(0,0,0,0.7);
+}
+
+.cheat-vars {
+  color: var(--text-muted);
+}
+
+.cheat-vars code {
+  color: var(--gold);
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-weight: 600;
+}
+
+.cheat-ex {
+  color: var(--text-muted);
+  opacity: 0.7;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.72rem;
+}
+
+.cheat-var-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cheat-var-row canvas {
+  flex-shrink: 0;
+}
+
+.cheat-example-row {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+
+.cheat-example-row canvas {
+  flex-shrink: 0;
+}
+
+.cheat-example-row code {
+  color: var(--valid);
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+}
+
+/* Code input */
+.code-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.code-input {
+  flex: 1;
+  min-width: 0;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--surface-light);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.85rem;
+  padding: 8px 10px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.code-input:focus {
+  border-color: var(--valid);
+  box-shadow: 0 0 8px rgba(74, 222, 128, 0.2);
+}
+
+.code-input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.4;
+}
+
+.char-counter {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  min-width: 55px;
+  text-align: right;
+}
+
+.char-counter.near-limit {
+  color: var(--gold);
+}
+
+.char-counter.at-limit {
+  color: var(--invalid);
+  font-weight: 600;
+}
+
+/* Error display */
+.code-error {
+  display: none;
+  font-size: 0.78rem;
+  color: var(--invalid);
+  padding: 4px 0;
+  line-height: 1.4;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  word-break: break-all;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.error-caterpillar {
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+/* Submit button */
+.code-submit-btn {
+  padding: 8px 20px;
+  font-size: 0.85rem;
   font-weight: 600;
   border: none;
   border-radius: 20px;
   background: linear-gradient(135deg, #a78bfa, #818cf8);
   color: #fff;
   cursor: pointer;
-  transition: transform 0.15s, box-shadow 0.2s;
+  transition: transform 0.15s, box-shadow 0.2s, opacity 0.2s;
   white-space: nowrap;
+  align-self: center;
 }
 
-.exam-start-btn:hover {
+.code-submit-btn:hover {
   transform: scale(1.04);
   box-shadow: 0 4px 20px rgba(167, 139, 250, 0.35);
 }
 
-/* ——— Exam ——— */
-
-.exam-progress-wrap {
-  width: 100%;
-  max-width: 300px;
-  height: 6px;
-  background: var(--surface);
-  border-radius: 3px;
-  overflow: hidden;
+.code-submit-btn.submitting {
+  opacity: 0.7;
+  cursor: wait;
 }
 
-.exam-progress-bar {
-  height: 100%;
-  background: linear-gradient(90deg, var(--valid), #6dd5fa);
-  border-radius: 3px;
-  transition: width 0.3s ease-out;
+/* ——— Toast ——— */
+
+.toast {
+  position: absolute;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-10px);
+  background: linear-gradient(135deg, #a78bfa, #818cf8);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 8px 20px;
+  border-radius: 20px;
+  z-index: 200;
+  opacity: 0;
+  transition: opacity 0.3s, transform 0.3s;
+  pointer-events: none;
+  box-shadow: 0 4px 20px rgba(167, 139, 250, 0.4);
 }
 
-.exam-label {
+.toast-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ——— Highlight flash for counterexamples ——— */
+
+@keyframes highlightFlash {
+  0%   { outline: 2px solid transparent; outline-offset: 2px; }
+  25%  { outline: 2px solid var(--gold); outline-offset: 2px; }
+  75%  { outline: 2px solid var(--gold); outline-offset: 2px; }
+  100% { outline: 2px solid transparent; outline-offset: 2px; }
+}
+
+.highlight-flash {
+  animation: highlightFlash 1.5s ease-out;
+}
+
+/* ——— Code reveal on victory ——— */
+
+.code-reveal {
   font-size: 0.85rem;
   color: var(--text-muted);
+  animation: popIn 0.5s ease-out 0.7s both;
+  text-align: center;
 }
 
-.exam-caterpillar {
-  display: flex;
-  justify-content: center;
-  padding: 4px 0;
-}
-
-.exam-buttons {
-  display: flex;
-  gap: 12px;
-}
-
-.exam-btn {
-  padding: 12px 28px;
-  font-size: 1rem;
+.code-reveal code {
+  color: var(--valid);
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
   font-weight: 600;
-  border: none;
-  border-radius: 12px;
-  cursor: pointer;
-  transition: transform 0.15s;
-  display: flex;
-  align-items: center;
-  gap: 6px;
 }
 
-.exam-btn:hover {
-  transform: scale(1.06);
+.code-length {
+  opacity: 0.6;
+  font-size: 0.75rem;
 }
 
-.exam-btn:active {
-  transform: scale(0.95);
-}
-
-.valid-answer {
-  background: var(--valid);
-  color: #052e16;
-}
-
-.invalid-answer {
-  background: var(--invalid);
-  color: #fff;
-}
-
-/* ——— Exam Result ——— */
-
-.exam-result {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 16px;
-  animation: popIn 0.4s ease-out;
-}
-
-.result-icon {
-  font-size: 2.5rem;
-}
-
-.result-text {
-  font-size: 1rem;
-  font-weight: 600;
+.threshold-hint {
+  font-size: 0.72rem;
   color: var(--text-muted);
+  opacity: 0.6;
+  animation: popIn 0.5s ease-out 0.8s both;
 }
 
 /* ——— Victory ——— */
@@ -852,6 +1021,15 @@ html, body {
   font-size: 0.92rem;
 }
 
+.help-text code {
+  color: var(--gold);
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.85rem;
+  background: rgba(251, 191, 36, 0.08);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
 .hl-valid {
   color: var(--valid);
   font-weight: 600;
@@ -883,21 +1061,12 @@ html, body {
     gap: 4px;
   }
 
-  .input-label { display: none; }
-
   .input-preview {
-    min-height: 30px;
-    max-width: 180px;
-    padding: 2px 6px;
+    min-height: 28px;
+    max-width: 140px;
   }
 
-  .input-controls {
-    flex-wrap: nowrap;
-    gap: 10px;
-    width: 100%;
-    justify-content: center;
-  }
-
+  .builder-row { gap: 6px; }
   .btn-group { gap: 3px; }
 
   .color-btn, .action-btn {
@@ -906,12 +1075,10 @@ html, body {
     border-radius: 7px;
   }
 
-  .exam-start-btn {
-    padding: 6px 10px;
-    font-size: 0.7rem;
-    margin-left: auto;
-    white-space: nowrap;
-  }
+  .code-section { margin-top: 2px; }
+  .code-input { font-size: 0.75rem; padding: 5px 8px; }
+  .code-submit-btn { padding: 5px 12px; font-size: 0.75rem; }
+  .cheat-sheet { font-size: 0.7rem; padding: 5px 8px; }
 
 }
 
@@ -921,8 +1088,8 @@ html, body {
   .game-subtitle { font-size: 0.8rem; }
   .color-btn, .action-btn { width: 36px; height: 32px; }
   .btn-group { gap: 4px; }
-  .exam-btn { padding: 8px 16px; font-size: 0.85rem; }
-  .exam-start-btn { font-size: 0.78rem; padding: 6px 14px; }
+  .code-input { font-size: 0.8rem; }
+  .code-submit-btn { font-size: 0.8rem; padding: 6px 16px; }
   .panel-header { font-size: 0.7rem; padding: 4px; }
   .bottom-section { padding: 5px 8px; gap: 4px; }
   .vstar { font-size: 1.8rem; }
