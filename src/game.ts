@@ -35,6 +35,10 @@ interface GameState {
   examAttempts: number;
   testedCount: number;
   animatedInstances: { destroy: () => void }[];
+  isTutorial: boolean;
+  tutorialStep: number;
+  tutorialSeenValid: boolean;
+  tutorialSeenInvalid: boolean;
 }
 
 const state: GameState = {
@@ -53,6 +57,10 @@ const state: GameState = {
   examAttempts: 0,
   testedCount: 0,
   animatedInstances: [],
+  isTutorial: false,
+  tutorialStep: 0,
+  tutorialSeenValid: false,
+  tutorialSeenInvalid: false,
 };
 
 function loadProgress(): Map<number, LevelProgress> {
@@ -313,11 +321,182 @@ function renderChooser() {
   pathWrap.appendChild(path);
   container.appendChild(pathWrap);
 
+  const btnRow = el('div', 'chooser-buttons');
+  const tutorialBtn = el('button', 'help-btn tutorial-btn', 'Tutorial');
+  tutorialBtn.addEventListener('click', () => { playClick(); startTutorial(); });
+  btnRow.appendChild(tutorialBtn);
   const helpBtn = el('button', 'help-btn', 'How to play');
   helpBtn.addEventListener('click', () => { playClick(); showHelp(); });
-  container.appendChild(helpBtn);
+  btnRow.appendChild(helpBtn);
+  container.appendChild(btnRow);
 
   app.appendChild(container);
+}
+
+// ——— Tutorial ———
+
+const TUTORIAL_RULE: RuleFunc = (seq: Sequence) => new Set(seq).size === 1;
+
+const TUTORIAL_VALID: Sequence[] = [[0,0,0], [1,1,1,1], [2,2], [3,3,3], [0,0,0,0,0], [1,1], [2,2,2,2], [3,3,3,3,3]];
+const TUTORIAL_INVALID: Sequence[] = [[0,1,0], [1,2,3], [0,0,1], [3,2,3], [1,0,1,0], [2,3,2], [0,1,2,3], [1,1,0]];
+
+interface TutorialHintDef {
+  text: string;
+  hasNext?: boolean;
+}
+
+const TUTORIAL_HINTS: TutorialHintDef[] = [
+  // 0: Look at examples
+  { text: 'These caterpillars follow a secret rule. The left ones are valid, the right ones are not. Can you spot the difference?', hasNext: true },
+  // 1: Pick a color
+  { text: 'Pick a color to start building a caterpillar.' },
+  // 2: Add more segments
+  { text: 'Add a few more segments.' },
+  // 3: Watch the face — hasNext becomes true dynamically once both expressions seen
+  { text: 'Watch the caterpillar\u2019s face \u2014 it smiles if it matches the rule, frowns if it doesn\u2019t. Try both!' },
+  // 4: Explain the + button
+  { text: 'Press + to save a caterpillar to your board. This helps you compare and spot the pattern.', hasNext: true },
+  // 5: Free exploration + exam hint
+  { text: '', hasNext: true }, // dynamic text
+  // 6: Exam in progress — no hint
+  { text: '' },
+];
+
+function startTutorial() {
+  state.isTutorial = true;
+  state.tutorialStep = 0;
+  state.tutorialSeenValid = false;
+  state.tutorialSeenInvalid = false;
+  state.currentLevel = -1;
+  state.currentRule = TUTORIAL_RULE;
+  state.mode = 'game';
+  state.inputChain = [];
+  state.examAttempts = 0;
+  state.testedCount = 0;
+
+  state.valids = TUTORIAL_VALID;
+  state.invalids = TUTORIAL_INVALID;
+  state.validHistory = TUTORIAL_VALID.slice(0, 3);
+  state.invalidHistory = TUTORIAL_INVALID.slice(0, 3);
+
+  state.screen = 'level';
+  renderLevel();
+  renderTutorialHint();
+}
+
+function removeTutorialHint() {
+  document.getElementById('tutorial-hint')?.remove();
+}
+
+function renderTutorialHint() {
+  removeTutorialHint();
+  if (!state.isTutorial) return;
+  const step = state.tutorialStep;
+  if (step >= TUTORIAL_HINTS.length) return;
+  const def = TUTORIAL_HINTS[step];
+
+  let text = def.text;
+  let showNext = def.hasNext ?? false;
+
+  // Step 3: show Continue only after both expressions seen
+  if (step === 3) {
+    showNext = state.tutorialSeenValid && state.tutorialSeenInvalid;
+  }
+  // Step 5: dynamic text
+  if (step === 5) {
+    text = state.testedCount < 2
+      ? 'Try saving a few more caterpillars to spot the pattern.'
+      : 'Keep exploring, or take the exam when you\u2019re ready.';
+  }
+  if (!text) return;
+
+  const hint = el('div', 'tutorial-hint');
+  hint.id = 'tutorial-hint';
+
+  const textEl = el('div', 'tutorial-hint-text', text);
+  hint.appendChild(textEl);
+
+  if (showNext) {
+    const nextBtn = el('button', 'tutorial-next-btn', step === 0 ? 'Got it' : 'Continue');
+    nextBtn.addEventListener('click', () => {
+      playClick();
+      state.tutorialStep++;
+      renderTutorialHint();
+    });
+    hint.appendChild(nextBtn);
+  }
+
+  // Insert at top of bottom-section (inline, no fixed positioning)
+  const bottom = document.getElementById('bottom-section');
+  if (bottom) {
+    bottom.prepend(hint);
+  }
+}
+
+function advanceTutorial(action: 'addColor' | 'submit' | 'startExam') {
+  if (!state.isTutorial) return;
+  const step = state.tutorialStep;
+
+  if (step === 1 && action === 'addColor') {
+    state.tutorialStep = 2;
+    renderTutorialHint();
+  } else if (step === 2 && action === 'addColor' && state.inputChain.length >= 3) {
+    state.tutorialStep = 3;
+    renderTutorialHint();
+  } else if (step === 5 && action === 'submit') {
+    // Update dynamic text after additional saves
+    renderTutorialHint();
+  } else if ((step === 5 || step === 4) && action === 'startExam') {
+    state.tutorialStep = 6;
+    removeTutorialHint();
+  }
+}
+
+function handleTutorialExamFail() {
+  state.mode = 'game';
+  playWrong();
+
+  const overlay = getOrCreateOverlay();
+  const msg = el('div', 'exam-result fail');
+  msg.innerHTML = '<div class="result-icon">\u{1F914}</div><div class="result-text">Not quite \u2014 keep exploring!</div>';
+  overlay.appendChild(msg);
+
+  setTimeout(() => {
+    removeOverlay();
+    renderGameInput();
+    state.tutorialStep = 5;
+    renderTutorialHint();
+  }, 1800);
+}
+
+function handleTutorialPass() {
+  playSuccess();
+
+  const overlay = getOrCreateOverlay();
+  const app = document.getElementById('app')!;
+  launchConfetti(app, 3000);
+
+  const msg = el('div', 'victory-text', 'You got it!');
+  overlay.appendChild(msg);
+
+  const reveal = el('div', 'rule-reveal');
+  const revealTitle = el('div', 'reveal-title', 'The rule was:');
+  reveal.appendChild(revealTitle);
+  const revealText = el('div', 'reveal-text', 'All segments must be the same color.');
+  reveal.appendChild(revealText);
+  overlay.appendChild(reveal);
+
+  const readyMsg = el('div', 'tutorial-ready-msg', "You're ready for the real puzzles!");
+  overlay.appendChild(readyMsg);
+
+  const startBtn = el('button', 'next-level-btn', 'Start playing \u2192');
+  startBtn.addEventListener('click', () => {
+    removeOverlay();
+    playClick();
+    state.isTutorial = false;
+    goToChooser();
+  });
+  overlay.appendChild(startBtn);
 }
 
 // ——— Level ———
@@ -349,18 +528,36 @@ function renderLevel() {
   // Top bar
   const topBar = el('div', 'top-bar');
   const backBtn = el('button', 'back-btn', '\u2190');
-  backBtn.addEventListener('click', () => { playClick(); goToChooser(); });
+  backBtn.addEventListener('click', () => { playClick(); if (state.isTutorial) state.isTutorial = false; goToChooser(); });
   topBar.appendChild(backBtn);
-  const levelLabel = el('span', 'level-label', `Level ${state.currentLevel + 1}`);
+  const levelLabel = el('span', 'level-label', state.isTutorial ? 'Tutorial' : `Level ${state.currentLevel + 1}`);
   topBar.appendChild(levelLabel);
 
-  // Tested counter
-  const counter = el('span', 'tested-counter');
-  counter.id = 'tested-counter';
-  counter.textContent = `Tested: ${state.testedCount}`;
-  topBar.appendChild(counter);
+  if (!state.isTutorial) {
+    // Tested counter
+    const counter = el('span', 'tested-counter');
+    counter.id = 'tested-counter';
+    counter.textContent = `Tested: ${state.testedCount}`;
+    topBar.appendChild(counter);
+  }
 
   container.appendChild(topBar);
+
+  // Show rule button for passed levels
+  const prog = state.progress.get(state.currentLevel);
+  if (prog?.passed) {
+    const ruleBtn = el('button', 'rule-toggle-btn', 'Show rule');
+    ruleBtn.addEventListener('click', () => {
+      if (ruleBtn.classList.contains('revealed')) {
+        ruleBtn.classList.remove('revealed');
+        ruleBtn.textContent = 'Show rule';
+      } else {
+        ruleBtn.classList.add('revealed');
+        ruleBtn.textContent = ruleDescriptions[state.currentLevel];
+      }
+    });
+    container.appendChild(ruleBtn);
+  }
 
   // History panels
   const historyArea = el('div', 'history-area');
@@ -426,28 +623,35 @@ function renderGameInput() {
   bottom.appendChild(previewWrapper);
   updateInputPreview();
 
-  const btnRow = el('div', 'input-buttons');
+  const controls = el('div', 'input-controls');
+
+  // Color buttons group
+  const colorGroup = el('div', 'btn-group color-group');
   for (let c = 0; c < 4; c++) {
     const btn = el('button', 'color-btn');
     btn.style.backgroundColor = toRGB(COLORS[c]);
     btn.addEventListener('click', () => { playClick(); addColor(c); });
-    btnRow.appendChild(btn);
+    colorGroup.appendChild(btn);
   }
+  controls.appendChild(colorGroup);
 
+  // Action buttons group (backspace + add)
+  const actionGroup = el('div', 'btn-group action-group');
   const bksp = el('button', 'action-btn backspace-btn', '\u232b');
   bksp.addEventListener('click', () => { playBackspace(); backspace(); });
-  btnRow.appendChild(bksp);
-
+  actionGroup.appendChild(bksp);
   const okBtn = el('button', 'action-btn ok-btn', '+');
   okBtn.title = 'Add to samples';
   okBtn.addEventListener('click', () => submitChain());
-  btnRow.appendChild(okBtn);
+  actionGroup.appendChild(okBtn);
+  controls.appendChild(actionGroup);
 
-  bottom.appendChild(btnRow);
-
-  const examBtn = el('button', 'exam-start-btn', '\u{1F9E0} I know the rule!');
+  // Exam button
+  const examBtn = el('button', 'exam-start-btn', '\u{1F9E0} Take the exam');
   examBtn.addEventListener('click', () => { playClick(); startExam(); });
-  bottom.appendChild(examBtn);
+  controls.appendChild(examBtn);
+
+  bottom.appendChild(controls);
 }
 
 let previewAnim: { destroy: () => void } | null = null;
@@ -462,14 +666,28 @@ function updateInputPreview() {
     previewAnim = null;
   }
   wrapper.innerHTML = '';
+  wrapper.classList.remove('preview-valid', 'preview-invalid');
 
   if (state.inputChain.length === 0) return;
 
   let eyeDir: EyeDirection = 'right';
   let mood: Mood = 'sad';
-  if (state.currentRule && state.currentRule(state.inputChain)) {
+  const isValid = state.currentRule && state.currentRule(state.inputChain);
+  if (isValid) {
     eyeDir = 'left';
     mood = 'happy';
+  }
+
+  wrapper.classList.add(isValid ? 'preview-valid' : 'preview-invalid');
+
+  // Track seen expressions for tutorial
+  if (state.isTutorial && state.tutorialStep === 3) {
+    if (isValid) state.tutorialSeenValid = true;
+    else state.tutorialSeenInvalid = true;
+    // Show "Continue" once both expressions seen
+    if (state.tutorialSeenValid && state.tutorialSeenInvalid) {
+      renderTutorialHint();
+    }
   }
 
   // Use static canvas for instant response, no animation overhead
@@ -481,6 +699,7 @@ function addColor(c: number) {
   if (state.inputChain.length >= 7) return;
   state.inputChain = [...state.inputChain, c];
   updateInputPreview();
+  advanceTutorial('addColor');
 }
 
 function backspace() {
@@ -517,6 +736,7 @@ function submitChain() {
 
   state.inputChain = [];
   updateInputPreview();
+  advanceTutorial('submit');
 }
 
 const MAX_HISTORY = 10;
@@ -549,11 +769,15 @@ function addToHistory(history: Sequence[], seq: Sequence, listId: string, eyeDir
 // ——— Exam: 15 perfect answers required ———
 
 function startExam() {
+  advanceTutorial('startExam');
   state.mode = 'exam';
   state.examAttempts++;
 
-  const validNum = Math.floor(Math.random() * 6) + 5;
-  const invalidNum = 15 - validNum;
+  const total = state.isTutorial ? 5 : 15;
+  const validNum = state.isTutorial
+    ? Math.floor(Math.random() * 2) + 2  // 2-3 valid out of 5
+    : Math.floor(Math.random() * 6) + 5;
+  const invalidNum = total - validNum;
 
   const validQs = getN(validNum, state.valids, state.validHistory).map(s => ({ seq: s, isValid: true }));
   const invalidQs = getN(invalidNum, state.invalids, state.invalidHistory).map(s => ({ seq: s, isValid: false }));
@@ -589,6 +813,7 @@ function renderExam() {
   const overlay = getOrCreateOverlay();
 
   if (state.examIndex >= state.examQuestions.length) {
+    if (state.isTutorial) { handleTutorialPass(); return; }
     handleExamPass();
     return;
   }
@@ -641,7 +866,7 @@ function answerExam(answeredValid: boolean) {
     } else {
       addToHistory(state.invalidHistory, q.seq, 'invalid-list', 'right', 'sad');
     }
-    setTimeout(() => handleExamFail(), 800);
+    setTimeout(() => state.isTutorial ? handleTutorialExamFail() : handleExamFail(), 800);
   }
 }
 
@@ -767,6 +992,8 @@ function goToChooser() {
   state.screen = 'chooser';
   state.mode = 'game';
   state.inputChain = [];
+  state.isTutorial = false;
+  removeTutorialHint();
   renderChooser();
 }
 

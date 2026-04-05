@@ -322,6 +322,54 @@ html, body {
   background: rgba(255, 110, 110, 0.08);
 }
 
+.chooser-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+/* ——— Tutorial Hints ——— */
+
+.tutorial-hint {
+  width: 100%;
+  background: rgba(251, 191, 36, 0.08);
+  border-bottom: 1px solid rgba(251, 191, 36, 0.25);
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  animation: popIn 0.25s ease-out;
+}
+
+.tutorial-hint-text {
+  color: var(--gold);
+  font-size: 0.85rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.tutorial-next-btn {
+  flex-shrink: 0;
+  padding: 4px 14px;
+  font-size: 0.8rem;
+  border: 1px solid var(--gold);
+  border-radius: 12px;
+  background: rgba(251, 191, 36, 0.12);
+  color: var(--gold);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.tutorial-next-btn:hover {
+  background: rgba(251, 191, 36, 0.25);
+}
+
+.tutorial-ready-msg {
+  color: var(--text-muted);
+  font-size: 1rem;
+  text-align: center;
+}
+
 /* ——— Level Screen ——— */
 
 .level-screen {
@@ -368,6 +416,22 @@ html, body {
   background: rgba(255,255,255,0.05);
   padding: 3px 10px;
   border-radius: 12px;
+}
+
+.rule-toggle-btn {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  padding: 4px 14px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s;
+}
+.rule-toggle-btn:hover { background: rgba(255,255,255,0.08); }
+.rule-toggle-btn.revealed {
+  color: var(--gold);
+  font-style: italic;
 }
 
 .history-area {
@@ -471,16 +535,34 @@ html, body {
   padding: 2px 10px;
   width: 100%;
   max-width: 300px;
+  transition: background 0.25s;
+}
+.input-preview.preview-valid {
+  background: var(--valid-dim);
+}
+.input-preview.preview-invalid {
+  background: var(--invalid-dim);
 }
 
 .input-preview canvas {
   max-width: 100%;
 }
 
-.input-buttons {
+.input-controls {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
   justify-content: center;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-group {
+  display: flex;
+  gap: 6px;
+}
+
+.action-group {
+  gap: 4px;
 }
 
 .color-btn {
@@ -789,45 +871,37 @@ html, body {
   .panel-header { padding: 3px; font-size: 0.7rem; }
 
   .bottom-section {
-    display: grid;
-    grid-template-columns: 1fr auto auto;
-    grid-template-rows: auto;
-    align-items: center;
     padding: 4px 10px;
-    gap: 4px 10px;
+    gap: 4px;
   }
 
   .input-label { display: none; }
 
-  /* Preview takes left column */
   .input-preview {
     min-height: 30px;
     max-width: 180px;
     padding: 2px 6px;
-    grid-column: 1;
-    grid-row: 1;
   }
 
-  /* All 6 buttons in one row */
-  .input-buttons {
-    display: flex;
-    gap: 3px;
-    grid-column: 2;
-    grid-row: 1;
+  .input-controls {
+    flex-wrap: nowrap;
+    gap: 10px;
+    width: 100%;
+    justify-content: center;
   }
+
+  .btn-group { gap: 3px; }
+
   .color-btn, .action-btn {
     width: 28px;
     height: 28px;
     border-radius: 7px;
   }
 
-  /* Exam button: right column */
   .exam-start-btn {
     padding: 6px 10px;
     font-size: 0.7rem;
-    grid-column: 3;
-    grid-row: 1;
-    writing-mode: horizontal-tb;
+    margin-left: auto;
     white-space: nowrap;
   }
 
@@ -838,7 +912,7 @@ html, body {
   .game-title { font-size: 1.5rem; }
   .game-subtitle { font-size: 0.8rem; }
   .color-btn, .action-btn { width: 36px; height: 32px; }
-  .input-buttons { gap: 4px; }
+  .btn-group { gap: 4px; }
   .exam-btn { padding: 8px 16px; font-size: 0.85rem; }
   .exam-start-btn { font-size: 0.78rem; padding: 6px 14px; }
   .panel-header { font-size: 0.7rem; padding: 4px; }
