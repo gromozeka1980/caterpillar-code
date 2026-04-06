@@ -58,6 +58,8 @@ export interface EvalResult {
   firstErrorIndex: number;
   /** Total number of caterpillars that threw */
   errorCount: number;
+  /** Short error message from the first exception, e.g. "NameError: name 'x' is not defined" */
+  errorMessage: string | null;
 }
 
 /**
@@ -84,6 +86,7 @@ ALL = json.loads('''${seqsJson}''')
 _results = []
 _first_err_idx = -1
 _err_count = 0
+_err_msg = None
 for _i, c in enumerate(ALL):
     f = {0: 0, 1: 0, 2: 0, 3: 0}
     for x in c:
@@ -98,13 +101,14 @@ for _i, c in enumerate(ALL):
         _prev = x
     try:
         _results.append(bool(${expr}))
-    except Exception:
+    except Exception as _e:
         _results.append(None)
         _err_count += 1
         if _first_err_idx < 0:
             _first_err_idx = _i
+            _err_msg = type(_e).__name__ + ': ' + str(_e)
 
-[_results, _first_err_idx, _err_count]
+[_results, _first_err_idx, _err_count, _err_msg]
 `;
 
   const result = await py.runPythonAsync(code);
@@ -115,7 +119,7 @@ for _i, c in enumerate(ALL):
     arr = pyList.toJs() as unknown[];
   } else {
     const globals = py.globals.get('_results') as { toJs(): unknown[] };
-    arr = [globals.toJs(), -1, 0];
+    arr = [globals.toJs(), -1, 0, null];
   }
 
   const rawResults = Array.from(arr[0] as Iterable<unknown>);
@@ -123,5 +127,6 @@ for _i, c in enumerate(ALL):
     results: rawResults.map(v => v === null ? null : Boolean(v)),
     firstErrorIndex: arr[1] as number,
     errorCount: arr[2] as number,
+    errorMessage: arr[3] as string | null,
   };
 }

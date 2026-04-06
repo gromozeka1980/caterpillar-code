@@ -650,6 +650,111 @@ function renderLevel() {
 
 // ——— Game Input ———
 
+// ——— Autocomplete ———
+
+const AC_WORDS = [
+  'len(', 'set(', 'sum(', 'all(', 'any(', 'min(', 'max(',
+  'sorted(', 'zip(', 'range(', 'enumerate(',
+  'True', 'False', 'not ', 'and ', 'or ', 'in ',
+  '.count(', '.index(',
+  'for ', 'lambda ',
+  'c', 'f', 's',
+];
+
+function getLastToken(value: string, cursor: number): string {
+  const before = value.slice(0, cursor);
+  const m = before.match(/[a-zA-Z_.]+$/);
+  return m ? m[0] : '';
+}
+
+function updateAutocomplete(input: HTMLInputElement) {
+  const token = getLastToken(input.value, input.selectionStart ?? input.value.length);
+  const dropdown = document.getElementById('ac-dropdown');
+
+  if (token.length === 0) {
+    if (dropdown) dropdown.style.display = 'none';
+    return;
+  }
+
+  const lower = token.toLowerCase();
+  const matches = AC_WORDS.filter(w => w.toLowerCase().startsWith(lower) && w.toLowerCase() !== lower);
+  if (matches.length === 0) {
+    if (dropdown) dropdown.style.display = 'none';
+    return;
+  }
+
+  let dd = dropdown;
+  if (!dd) {
+    dd = el('div', 'ac-dropdown');
+    dd.id = 'ac-dropdown';
+    input.parentElement!.appendChild(dd);
+  }
+
+  dd.innerHTML = '';
+  dd.style.display = 'block';
+
+  for (let i = 0; i < Math.min(matches.length, 6); i++) {
+    const item = el('div', `ac-item${i === 0 ? ' ac-active' : ''}`, matches[i]);
+    item.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      applyAutocomplete(input, matches[i]);
+    });
+    dd.appendChild(item);
+  }
+}
+
+function handleAutocompleteKey(e: KeyboardEvent, input: HTMLInputElement): boolean {
+  const dd = document.getElementById('ac-dropdown');
+  if (!dd || dd.style.display === 'none') return false;
+
+  const items = dd.querySelectorAll('.ac-item');
+  const activeIdx = Array.from(items).findIndex(i => i.classList.contains('ac-active'));
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    items[activeIdx]?.classList.remove('ac-active');
+    items[(activeIdx + 1) % items.length]?.classList.add('ac-active');
+    return true;
+  }
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    items[activeIdx]?.classList.remove('ac-active');
+    items[(activeIdx - 1 + items.length) % items.length]?.classList.add('ac-active');
+    return true;
+  }
+  if (e.key === 'Tab' || (e.key === 'Enter' && activeIdx >= 0)) {
+    e.preventDefault();
+    const active = dd.querySelector('.ac-active');
+    if (active) applyAutocomplete(input, active.textContent!);
+    return true;
+  }
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    dd.style.display = 'none';
+    return true;
+  }
+  return false;
+}
+
+function applyAutocomplete(input: HTMLInputElement, word: string) {
+  const cursor = input.selectionStart ?? input.value.length;
+  const token = getLastToken(input.value, cursor);
+  const before = input.value.slice(0, cursor - token.length);
+  const after = input.value.slice(cursor);
+  input.value = before + word + after;
+  const newCursor = before.length + word.length;
+  input.setSelectionRange(newCursor, newCursor);
+  state.codeInput = input.value;
+  updateCharCounter();
+  dismissAutocomplete();
+  input.focus();
+}
+
+function dismissAutocomplete() {
+  const dd = document.getElementById('ac-dropdown');
+  if (dd) dd.style.display = 'none';
+}
+
 function renderGameInput() {
   const bottom = document.getElementById('bottom-section')!;
   bottom.innerHTML = '';
@@ -768,12 +873,17 @@ function renderGameInput() {
     state.codeError = null;
     updateCharCounter();
     updateErrorDisplay();
+    updateAutocomplete(codeInput);
   });
   codeInput.addEventListener('keydown', (e) => {
+    if (handleAutocompleteKey(e, codeInput)) return;
     if (e.key === 'Enter' && !state.codeSubmitting) {
       e.preventDefault();
       submitCode();
     }
+  });
+  codeInput.addEventListener('blur', () => {
+    setTimeout(dismissAutocomplete, 150);
   });
   codeInputRow.appendChild(codeInput);
 
@@ -882,8 +992,9 @@ async function submitCode() {
 
     // If ALL caterpillars threw exceptions — show error
     if (evalResult.errorCount === seqs.length) {
+      const msg = evalResult.errorMessage || 'Runtime error';
       showErrorWithCaterpillar(
-        'Your expression throws an error for every caterpillar',
+        msg,
         seqs[evalResult.firstErrorIndex],
       );
       playWrong();
@@ -893,8 +1004,9 @@ async function submitCode() {
     // If SOME caterpillars threw exceptions — show where
     if (evalResult.errorCount > 0) {
       const errSeq = seqs[evalResult.firstErrorIndex];
+      const msg = evalResult.errorMessage || 'Runtime error';
       showErrorWithCaterpillar(
-        `Your expression throws an error on ${evalResult.errorCount} caterpillar${evalResult.errorCount > 1 ? 's' : ''}`,
+        `${msg} (on ${evalResult.errorCount} caterpillar${evalResult.errorCount > 1 ? 's' : ''})`,
         errSeq,
       );
       playWrong();
@@ -929,8 +1041,14 @@ async function submitCode() {
       // Wrong — provide feedback
       handleWrongSubmission(playerResults, ruleResults, seqs);
     }
-  } catch (_err: unknown) {
-    state.codeError = 'Syntax error';
+  } catch (err: unknown) {
+    // Extract last line of traceback (e.g. "SyntaxError: invalid syntax")
+    const raw = err instanceof Error ? err.message : String(err);
+    const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+    const lastLine = lines[lines.length - 1] || 'Syntax error';
+    // Keep only "ErrorType: message", strip module paths
+    const match = lastLine.match(/^(\w+Error):\s*(.*)/);
+    state.codeError = match ? `${match[1]}: ${match[2]}` : 'Syntax error';
     updateErrorDisplay();
     playWrong();
   } finally {
