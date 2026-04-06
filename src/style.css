@@ -108,6 +108,82 @@ html, body {
   animation: flashRed 0.4s ease-out;
 }
 
+/* ——— Main Menu ——— */
+
+.menu-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 16px;
+  padding: 24px 16px;
+}
+
+.menu-demo {
+  margin: 8px 0;
+}
+
+.menu-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 260px;
+  margin-top: 8px;
+}
+
+.menu-btn {
+  padding: 14px 24px;
+  font-size: 1rem;
+  font-weight: 600;
+  border: 1px solid var(--surface-light);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+}
+
+.menu-btn:hover {
+  background: var(--surface-light);
+  transform: scale(1.03);
+}
+
+.menu-btn-primary {
+  background: linear-gradient(135deg, #a78bfa, #818cf8);
+  border: none;
+  color: #fff;
+  font-size: 1.1rem;
+  padding: 16px 24px;
+}
+
+.menu-btn-primary:hover {
+  box-shadow: 0 4px 20px rgba(167, 139, 250, 0.35);
+}
+
+.menu-btn-share {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.1);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  padding: 10px 24px;
+}
+
+.menu-btn-share:hover {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+.shared-stats {
+  text-align: center;
+  font-size: 1rem;
+  color: var(--gold);
+  padding: 12px;
+  font-weight: 600;
+}
+
 /* ——— Level Chooser / Path Map ——— */
 
 .chooser-screen {
@@ -115,8 +191,7 @@ html, body {
   flex-direction: column;
   align-items: center;
   height: 100%;
-  gap: 20px;
-  padding: 24px 16px;
+  gap: 0;
 }
 
 .game-title {
@@ -322,11 +397,6 @@ html, body {
   background: rgba(255, 110, 110, 0.08);
 }
 
-.chooser-buttons {
-  display: flex;
-  gap: 12px;
-  justify-content: center;
-}
 
 /* ——— Tutorial Hints ——— */
 

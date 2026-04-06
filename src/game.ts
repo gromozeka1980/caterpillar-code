@@ -13,7 +13,7 @@ import { getStars, MAX_CODE_LENGTH, STAR_THRESHOLDS } from './starThresholds';
 
 let gameLayout: GameLayout = calcGameLayout();
 
-type Screen = 'chooser' | 'level' | 'help';
+type Screen = 'menu' | 'chooser' | 'level' | 'help';
 
 interface LevelProgress {
   passed: boolean;
@@ -44,7 +44,7 @@ interface GameState {
 }
 
 const state: GameState = {
-  screen: 'chooser',
+  screen: 'menu',
   currentLevel: -1,
   currentRule: null,
   progress: loadProgress(),
@@ -286,15 +286,97 @@ function renderChooserLandscape(path: HTMLElement, L: { segW: number; segH: numb
   }
 }
 
-function renderChooser() {
+// ——— Main Menu ———
+
+function renderMenu() {
   clearScreen();
   const app = document.getElementById('app')!;
-  const container = el('div', 'chooser-screen');
+  const container = el('div', 'menu-screen');
 
   const title = el('h1', 'game-title', 'Caterpillar Code');
   container.appendChild(title);
   const subtitle = el('p', 'game-subtitle', 'Write Python one-liners to crack the rules');
   container.appendChild(subtitle);
+
+  // Animated demo caterpillar
+  const demo = el('div', 'menu-demo');
+  const anim = createAnimatedCaterpillar([0, 1, 2, 1, 0], 260, 52, 'forward', 'happy');
+  demo.appendChild(anim.canvas);
+  state.animatedInstances.push(anim);
+  container.appendChild(demo);
+
+  const btnCol = el('div', 'menu-buttons');
+
+  const playBtn = el('button', 'menu-btn menu-btn-primary', '\u25b6 Play');
+  playBtn.addEventListener('click', () => { playClick(); goToChooser(); });
+  btnCol.appendChild(playBtn);
+
+  const tutorialBtn = el('button', 'menu-btn', '\ud83c\udf93 Tutorial');
+  tutorialBtn.addEventListener('click', () => { playClick(); startTutorial(); });
+  btnCol.appendChild(tutorialBtn);
+
+  const helpBtn = el('button', 'menu-btn', '\u2753 How to play');
+  helpBtn.addEventListener('click', () => { playClick(); showHelp(); });
+  btnCol.appendChild(helpBtn);
+
+  // Share progress button (only show if any level passed)
+  if (state.progress.size > 0) {
+    const shareBtn = el('button', 'menu-btn menu-btn-share', '\ud83d\udcca Share progress');
+    shareBtn.addEventListener('click', () => { playClick(); shareProgress(shareBtn); });
+    btnCol.appendChild(shareBtn);
+  }
+
+  container.appendChild(btnCol);
+
+  app.appendChild(container);
+}
+
+// ——— Share Progress ———
+
+function encodeProgress(): string {
+  // Encode as: level(1byte) + stars(2bits) + bestLength(7bits) packed
+  // Simple approach: JSON → base64
+  const data: Record<number, { s: number; l: number }> = {};
+  for (const [level, prog] of state.progress) {
+    if (prog.passed) {
+      data[level] = { s: prog.stars, l: prog.bestLength ?? 0 };
+    }
+  }
+  return btoa(JSON.stringify(data));
+}
+
+function buildShareUrl(): string {
+  const encoded = encodeProgress();
+  const base = window.location.href.split('?')[0].split('#')[0];
+  return `${base}?p=${encoded}`;
+}
+
+function shareProgress(btn: HTMLElement) {
+  const url = buildShareUrl();
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(url).then(() => {
+      btn.textContent = '\u2705 Link copied!';
+      setTimeout(() => { btn.textContent = '\ud83d\udcca Share progress'; }, 2000);
+    });
+  } else {
+    // Fallback
+    prompt('Copy this link to share your progress:', url);
+  }
+}
+
+function renderChooser() {
+  clearScreen();
+  const app = document.getElementById('app')!;
+  const container = el('div', 'chooser-screen');
+
+  // Top bar with back button
+  const topBar = el('div', 'top-bar');
+  const backBtn = el('button', 'back-btn', '\u2190');
+  backBtn.addEventListener('click', () => { playClick(); state.screen = 'menu'; renderMenu(); });
+  topBar.appendChild(backBtn);
+  const levelLabel = el('span', 'level-label', 'Choose a level');
+  topBar.appendChild(levelLabel);
+  container.appendChild(topBar);
 
   const L = calcChooserLayout();
 
@@ -309,15 +391,6 @@ function renderChooser() {
 
   pathWrap.appendChild(path);
   container.appendChild(pathWrap);
-
-  const btnRow = el('div', 'chooser-buttons');
-  const tutorialBtn = el('button', 'help-btn tutorial-btn', 'Tutorial');
-  tutorialBtn.addEventListener('click', () => { playClick(); startTutorial(); });
-  btnRow.appendChild(tutorialBtn);
-  const helpBtn = el('button', 'help-btn', 'How to play');
-  helpBtn.addEventListener('click', () => { playClick(); showHelp(); });
-  btnRow.appendChild(helpBtn);
-  container.appendChild(btnRow);
 
   app.appendChild(container);
 }
@@ -345,7 +418,7 @@ const TUTORIAL_HINTS: TutorialHintDef[] = [
   { text: 'Watch the caterpillar\u2019s face \u2014 it smiles if it\u2019s valid, frowns if it\u2019s not. Try both!' },
   // 4: Explain the + button (auto-advances on submit)
   { text: 'Press + to save a caterpillar to your board. This helps you compare and spot the pattern.' },
-  // 5: Free exploration + code hint
+  // 5: Free exploration + code hint + cheat-sheet mention
   { text: '' },
   // 6: Code submission in progress — no hint
   { text: '' },
@@ -391,7 +464,7 @@ function renderTutorialHint() {
   if (step === 5) {
     text = state.testedCount < 2
       ? 'Try saving a few more caterpillars to spot the pattern.'
-      : 'When you think you know the rule, write a Python expression below. For example: len(set(c))==1';
+      : 'When you think you know the rule, write a Python expression below. Hit \u24d8 for a quick reference on the available variables.';
   }
   if (!text) return;
 
@@ -1139,7 +1212,7 @@ function showHelp() {
   const container = el('div', 'help-screen');
 
   const backBtn = el('button', 'back-btn', '\u2190 Back');
-  backBtn.addEventListener('click', () => { playClick(); goToChooser(); });
+  backBtn.addEventListener('click', () => { playClick(); state.screen = 'menu'; renderMenu(); });
   container.appendChild(backBtn);
 
   const title = el('h2', 'help-title', 'How to Play');
@@ -1189,16 +1262,90 @@ function goToChooser() {
 
 // ——— Init ———
 
+function tryShowSharedProgress(): boolean {
+  const params = new URLSearchParams(window.location.search);
+  const encoded = params.get('p');
+  if (!encoded) return false;
+  try {
+    const data: Record<string, { s: number; l: number }> = JSON.parse(atob(encoded));
+    renderSharedProgress(data);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function renderSharedProgress(data: Record<string, { s: number; l: number }>) {
+  clearScreen();
+  const app = document.getElementById('app')!;
+  const container = el('div', 'chooser-screen');
+
+  const topBar = el('div', 'top-bar');
+  const backBtn = el('button', 'back-btn', '\u2190');
+  backBtn.addEventListener('click', () => {
+    // Strip ?p= from URL and go to own menu
+    window.history.replaceState(null, '', window.location.pathname);
+    state.screen = 'menu';
+    renderMenu();
+  });
+  topBar.appendChild(backBtn);
+  const label = el('span', 'level-label', 'Shared progress');
+  topBar.appendChild(label);
+  container.appendChild(topBar);
+
+  // Build a temporary progress map for rendering
+  const savedProgress = state.progress;
+  const sharedProgress = new Map<number, LevelProgress>();
+  for (const [lvl, info] of Object.entries(data)) {
+    sharedProgress.set(Number(lvl), { passed: true, stars: info.s, bestLength: info.l });
+  }
+  state.progress = sharedProgress;
+
+  const L = calcChooserLayout();
+  const pathWrap = el('div', 'path-wrap');
+  const path = el('div', 'path-map');
+
+  if (!L.portrait) {
+    renderChooserLandscape(path, L);
+  } else {
+    renderChooserPortrait(path, L);
+  }
+
+  // Disable all clicks on segments (read-only)
+  path.querySelectorAll('.seg').forEach(seg => {
+    (seg as HTMLElement).style.pointerEvents = 'none';
+    (seg as HTMLElement).style.cursor = 'default';
+  });
+
+  pathWrap.appendChild(path);
+  container.appendChild(pathWrap);
+
+  // Stats summary
+  const passed = sharedProgress.size;
+  const totalStars = [...sharedProgress.values()].reduce((a, p) => a + p.stars, 0);
+  const stats = el('div', 'shared-stats');
+  stats.innerHTML = `${passed}/20 levels \u00b7 ${totalStars} \u2605`;
+  container.appendChild(stats);
+
+  app.appendChild(container);
+
+  // Restore own progress
+  state.progress = savedProgress;
+}
+
 export function init() {
   initSignatures();
-  renderChooser();
+  if (!tryShowSharedProgress()) {
+    renderMenu();
+  }
 
   // Re-render on orientation change
   let resizeTimer = 0;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
     resizeTimer = window.setTimeout(() => {
-      if (state.screen === 'chooser') renderChooser();
+      if (state.screen === 'menu') renderMenu();
+      else if (state.screen === 'chooser') renderChooser();
       else if (state.screen === 'level') renderLevel();
     }, 200);
   });
