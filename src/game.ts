@@ -1520,26 +1520,19 @@ async function showCreateLevel() {
 
   const form = el('div', 'create-form');
 
-  // Title
-  const titleLabel = el('div', 'create-label', 'Title');
-  form.appendChild(titleLabel);
-  const titleInput = el('input', 'create-input') as HTMLInputElement;
-  titleInput.type = 'text';
-  titleInput.placeholder = 'Give your level a name';
-  titleInput.maxLength = 60;
-  form.appendChild(titleInput);
-
   // Expression (the rule)
   const exprLabel = el('div', 'create-label', 'Rule expression (c, f, s)');
   form.appendChild(exprLabel);
   const exprInput = el('textarea', 'code-input create-expr') as HTMLTextAreaElement;
-  exprInput.rows = 2;
+  exprInput.rows = 1;
   exprInput.placeholder = 'e.g. f[0] + f[3] == 5';
-  exprInput.maxLength = 120;
+  exprInput.maxLength = MAX_CODE_LENGTH;
   exprInput.spellcheck = false;
   exprInput.wrap = 'soft';
   exprInput.addEventListener('input', () => {
     exprInput.value = exprInput.value.replace(/\n/g, '');
+    const autoResize = () => { exprInput.style.height = 'auto'; exprInput.style.height = exprInput.scrollHeight + 'px'; };
+    autoResize();
   });
   form.appendChild(exprInput);
 
@@ -1604,15 +1597,8 @@ async function showCreateLevel() {
   const publishBtn = el('button', 'menu-btn menu-btn-primary', '\ud83d\ude80 Publish');
   publishBtn.style.display = 'none';
   publishBtn.addEventListener('click', async () => {
-    const title = titleInput.value.trim();
     const expr = exprInput.value.trim();
     const error = document.getElementById('create-error')!;
-
-    if (title.length < 3) {
-      error.textContent = 'Title must be at least 3 characters';
-      error.style.display = 'flex';
-      return;
-    }
 
     const results = (previewBtn as any)._results as boolean[];
     const validCount = (previewBtn as any)._validCount as number;
@@ -1628,7 +1614,7 @@ async function showCreateLevel() {
     // Check duplicate
     const dup = await api.checkDuplicate(canonicalSig);
     if (dup) {
-      error.textContent = `A level with this rule already exists: "${dup.title}"`;
+      error.textContent = 'A level with this rule already exists';
       error.style.display = 'flex';
       return;
     }
@@ -1637,6 +1623,12 @@ async function showCreateLevel() {
     publishBtn.classList.add('submitting');
 
     try {
+      // Auto-generate title from username
+      const user = getUser();
+      const username = user?.user_metadata?.user_name || user?.user_metadata?.name || 'anon';
+      const levelNum = (await api.fetchMyLevelCount()) + 1;
+      const title = `${username} #${levelNum}`;
+
       await api.createLevel({
         title,
         expression: expr,

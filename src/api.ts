@@ -165,6 +165,17 @@ export async function syncBuiltinProgress(
   if (error) throw error;
 }
 
+// ——— My level count (for auto-naming) ———
+
+export async function fetchMyLevelCount(): Promise<number> {
+  const { count, error } = await supabase
+    .from('levels')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'active');
+  if (error) return 0;
+  return count ?? 0;
+}
+
 // ——— Check duplicate canonical signature ———
 
 export async function checkDuplicate(canonicalSignature: string): Promise<CommunityLevel | null> {
