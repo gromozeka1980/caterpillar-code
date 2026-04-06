@@ -1098,6 +1098,14 @@ function handlePass() {
   thresholdHint.innerHTML = `\u2605\u2605\u2605 \u2264 ${threeMax} chars &nbsp;\u00b7&nbsp; \u2605\u2605 \u2264 ${twoMax} chars`;
   overlay.appendChild(thresholdHint);
 
+  const btnRow = el('div', 'victory-buttons');
+
+  if (stars < 3) {
+    const retryBtn = el('button', 'next-level-btn victory-retry-btn', '\u21bb Try again');
+    retryBtn.addEventListener('click', () => { removeOverlay(); playClick(); startLevel(state.currentLevel); });
+    btnRow.appendChild(retryBtn);
+  }
+
   const nextBtn = el('button', 'next-level-btn');
   if (state.currentLevel < 19) {
     nextBtn.textContent = 'Next Level \u2192';
@@ -1106,7 +1114,9 @@ function handlePass() {
     nextBtn.textContent = 'Back to Levels';
     nextBtn.addEventListener('click', () => { removeOverlay(); playClick(); goToChooser(); });
   }
-  overlay.appendChild(nextBtn);
+  btnRow.appendChild(nextBtn);
+
+  overlay.appendChild(btnRow);
 }
 
 let previewAnim: { destroy: () => void } | null = null;

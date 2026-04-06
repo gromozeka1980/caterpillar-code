@@ -1054,6 +1054,21 @@ html, body {
   color: var(--text);
 }
 
+.victory-buttons {
+  display: flex;
+  gap: 10px;
+  animation: popIn 0.5s ease-out 1s both;
+}
+
+.victory-retry-btn {
+  background: var(--surface) !important;
+  border: 1px solid var(--surface-light) !important;
+}
+
+.victory-retry-btn:hover {
+  background: var(--surface-light) !important;
+}
+
 .next-level-btn {
   padding: 12px 28px;
   font-size: 1rem;
