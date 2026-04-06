@@ -78,10 +78,14 @@ export async function evaluateExpression(
 
   const seqsJson = JSON.stringify(allSeqs);
 
+  // Escape the expression for safe embedding in a Python string
+  const escaped = expr.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
   const code = `
 import json
 
 ALL = json.loads('''${seqsJson}''')
+_expr = compile('${escaped}', '<expr>', 'eval')
 
 _results = []
 _first_err_idx = -1
@@ -100,7 +104,7 @@ for _i, c in enumerate(ALL):
             s.append((x, 1))
         _prev = x
     try:
-        _results.append(bool(${expr}))
+        _results.append(bool(eval(_expr)))
     except Exception as _e:
         _results.append(None)
         _err_count += 1
