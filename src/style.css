@@ -812,37 +812,6 @@ html, body {
   position: relative;
 }
 
-/* Autocomplete dropdown */
-.ac-dropdown {
-  display: none;
-  position: absolute;
-  bottom: 100%;
-  left: 0;
-  right: 55px;
-  background: var(--surface);
-  border: 1px solid var(--surface-light);
-  border-radius: 8px;
-  padding: 4px 0;
-  z-index: 10;
-  max-height: 160px;
-  overflow-y: auto;
-  box-shadow: 0 -4px 16px rgba(0,0,0,0.4);
-  margin-bottom: 4px;
-}
-
-.ac-item {
-  padding: 5px 10px;
-  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
-  font-size: 0.82rem;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: background 0.1s;
-}
-
-.ac-item:hover, .ac-item.ac-active {
-  background: rgba(167, 139, 250, 0.15);
-  color: var(--text);
-}
 
 .code-input {
   flex: 1;
