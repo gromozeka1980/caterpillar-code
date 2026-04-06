@@ -67,11 +67,71 @@ export function isConsistentWithExamples(
   return true;
 }
 
+/** Generate all 24 permutations of [0,1,2,3] */
+function allColorPermutations(): number[][] {
+  const perms: number[][] = [];
+  const colors = [0, 1, 2, 3];
+  function permute(arr: number[], start: number) {
+    if (start === arr.length) { perms.push([...arr]); return; }
+    for (let i = start; i < arr.length; i++) {
+      [arr[start], arr[i]] = [arr[i], arr[start]];
+      permute(arr, start + 1);
+      [arr[start], arr[i]] = [arr[i], arr[start]];
+    }
+  }
+  permute(colors, 0);
+  return perms;
+}
+
+/**
+ * Compute canonical signature — the lexicographically smallest signature
+ * across all 24 color permutations. Two rules that differ only by renaming
+ * colors will produce the same canonical signature.
+ */
+export function computeCanonicalSignature(results: boolean[]): string {
+  const perms = allColorPermutations();
+  let minSig = buildSignature(results); // identity permutation
+
+  for (const perm of perms) {
+    // For this permutation, build a mapping: original caterpillar index → permuted index
+    // We need to evaluate: for each caterpillar, apply the color permutation,
+    // find the result of the ORIGINAL rule on the permuted caterpillar
+    // But we already have results for all caterpillars — we just need to
+    // reorder them based on permuted caterpillar positions
+
+    // Build index map: permuted_seq → original index
+    const permutedResults: boolean[] = new Array(ALL_SEQS.length);
+    for (let i = 0; i < ALL_SEQS.length; i++) {
+      // Apply inverse permutation to find which original seq maps to this one
+      const permutedSeq = ALL_SEQS[i].map(c => perm[c]);
+      const key = permutedSeq.join(',');
+      const origIdx = seqIndex.get(key);
+      if (origIdx !== undefined) {
+        permutedResults[i] = results[origIdx];
+      }
+    }
+
+    const sig = buildSignature(permutedResults);
+    if (sig < minSig) minSig = sig;
+  }
+
+  return minSig;
+}
+
+// Index for fast caterpillar lookup by key
+let seqIndex: Map<string, number> = new Map();
+
 /** Initialize ALL_SEQS and SIGNATURES. Call once at startup. */
 export function initSignatures() {
   ALL_SEQS = [];
   for (const seq of generateCombinations(4, 6)) {
     ALL_SEQS.push(seq);
+  }
+
+  // Build index for fast lookup (used by computeCanonicalSignature)
+  seqIndex = new Map();
+  for (let i = 0; i < ALL_SEQS.length; i++) {
+    seqIndex.set(ALL_SEQS[i].join(','), i);
   }
 
   SIGNATURES = rules.map((rule: RuleFunc) => {

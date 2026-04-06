@@ -10,10 +10,13 @@ import { calcGameLayout, calcChooserLayout, type GameLayout } from './layout';
 import { initSignatures, ALL_SEQS, buildSignature, compareSignatures, isConsistentWithExamples } from './signatures';
 import { evaluateExpression, isPyodideReady } from './pyodide';
 import { getStars, MAX_CODE_LENGTH, STAR_THRESHOLDS } from './starThresholds';
+import { initAuth, getUser, isSignedIn, signInWithGitHub, signInWithGoogle, signOut, type CommunityLevel } from './supabase';
+import { computeCanonicalSignature } from './signatures';
+import * as api from './api';
 
 let gameLayout: GameLayout = calcGameLayout();
 
-type Screen = 'menu' | 'chooser' | 'level' | 'help';
+type Screen = 'menu' | 'chooser' | 'level' | 'help' | 'community' | 'create-level' | 'leaderboard' | 'profile';
 
 interface LevelProgress {
   passed: boolean;
@@ -41,6 +44,7 @@ interface GameState {
   tutorialSeenValid: boolean;
   tutorialSeenInvalid: boolean;
   cheatSheetOpen: boolean;
+  communityLevel: CommunityLevel | null;
 }
 
 const state: GameState = {
@@ -63,6 +67,7 @@ const state: GameState = {
   tutorialSeenValid: false,
   tutorialSeenInvalid: false,
   cheatSheetOpen: false,
+  communityLevel: null,
 };
 
 function loadProgress(): Map<number, LevelProgress> {
@@ -311,11 +316,60 @@ function renderMenu() {
   playBtn.addEventListener('click', () => { playClick(); goToChooser(); });
   btnCol.appendChild(playBtn);
 
+  const communityBtn = el('button', 'menu-btn', '\ud83c\udf10 Community Levels');
+  communityBtn.addEventListener('click', () => { playClick(); showCommunityBrowser(); });
+  btnCol.appendChild(communityBtn);
+
   const helpBtn = el('button', 'menu-btn', '\u2753 How to play');
   helpBtn.addEventListener('click', () => { playClick(); showHelp(); });
   btnCol.appendChild(helpBtn);
 
   container.appendChild(btnCol);
+
+  // Auth section
+  const authSection = el('div', 'auth-section');
+  if (isSignedIn()) {
+    const user = getUser()!;
+    const avatar = user.user_metadata?.avatar_url;
+    const name = user.user_metadata?.user_name || user.user_metadata?.name || user.email || 'User';
+
+    const userRow = el('div', 'auth-user-row');
+    if (avatar) {
+      const img = document.createElement('img');
+      img.src = avatar;
+      img.className = 'auth-avatar';
+      img.alt = name;
+      userRow.appendChild(img);
+    }
+    const nameEl = el('span', 'auth-username', name);
+    userRow.appendChild(nameEl);
+    authSection.appendChild(userRow);
+
+    const btnRow = el('div', 'auth-btn-row');
+    const profileBtn = el('button', 'auth-link', 'Profile');
+    profileBtn.addEventListener('click', () => { playClick(); showProfile(); });
+    btnRow.appendChild(profileBtn);
+    const lbBtn = el('button', 'auth-link', 'Leaderboard');
+    lbBtn.addEventListener('click', () => { playClick(); showLeaderboard(); });
+    btnRow.appendChild(lbBtn);
+    const outBtn = el('button', 'auth-link', 'Sign out');
+    outBtn.addEventListener('click', async () => { await signOut(); renderMenu(); });
+    btnRow.appendChild(outBtn);
+    authSection.appendChild(btnRow);
+  } else {
+    const signInLabel = el('div', 'auth-label', 'Sign in to create & rate levels');
+    authSection.appendChild(signInLabel);
+    const btnRow = el('div', 'auth-btn-row');
+    const ghBtn = el('button', 'auth-btn-oauth', '\uf09b GitHub');
+    ghBtn.style.fontFamily = 'system-ui, sans-serif';
+    ghBtn.addEventListener('click', () => signInWithGitHub());
+    btnRow.appendChild(ghBtn);
+    const gBtn = el('button', 'auth-btn-oauth', 'Google');
+    gBtn.addEventListener('click', () => signInWithGoogle());
+    btnRow.appendChild(gBtn);
+    authSection.appendChild(btnRow);
+  }
+  container.appendChild(authSection);
 
   app.appendChild(container);
 }
@@ -577,12 +631,19 @@ function renderLevel() {
       state.isTutorial = false;
       state.screen = 'menu';
       renderMenu();
+    } else if (state.communityLevel) {
+      state.communityLevel = null;
+      showCommunityBrowser();
     } else {
       goToChooser();
     }
   });
   topBar.appendChild(backBtn);
-  const levelLabel = el('span', 'level-label', state.isTutorial ? 'Tutorial' : `Level ${state.currentLevel + 1}`);
+  const levelLabel = el('span', 'level-label',
+    state.isTutorial ? 'Tutorial'
+    : state.communityLevel ? state.communityLevel.title
+    : `Level ${state.currentLevel + 1}`
+  );
   topBar.appendChild(levelLabel);
 
   container.appendChild(topBar);
@@ -1051,18 +1112,27 @@ function showErrorWithCaterpillar(message: string, seq: number[], mood: Mood = '
 
 function handlePass() {
   const codeLen = state.codeInput.trim().length;
-  const stars = getStars(state.currentLevel, codeLen);
+  const isCommunity = state.communityLevel !== null;
 
-  const existing = state.progress.get(state.currentLevel);
-  const bestStars = Math.max(existing?.stars ?? 0, stars);
-  const bestLength = Math.min(existing?.bestLength ?? Infinity, codeLen);
+  // Save progress for built-in levels
+  if (!isCommunity) {
+    const stars = getStars(state.currentLevel, codeLen);
+    const existing = state.progress.get(state.currentLevel);
+    const bestStars = Math.max(existing?.stars ?? 0, stars);
+    const bestLength = Math.min(existing?.bestLength ?? Infinity, codeLen);
 
-  state.progress.set(state.currentLevel, {
-    passed: true,
-    stars: bestStars,
-    bestLength,
-  });
-  saveProgress();
+    state.progress.set(state.currentLevel, {
+      passed: true,
+      stars: bestStars,
+      bestLength,
+    });
+    saveProgress();
+  }
+
+  // Submit solution for community levels
+  if (isCommunity && isSignedIn()) {
+    api.submitSolution(state.communityLevel!.id, state.codeInput.trim(), codeLen).catch(() => {});
+  }
 
   playSuccess();
 
@@ -1070,22 +1140,29 @@ function handlePass() {
   const app = document.getElementById('app')!;
   launchConfetti(app, 3000);
 
-  const starsEl = el('div', 'victory-stars');
-  for (let s = 0; s < 3; s++) {
-    const star = el('span', s < stars ? 'vstar filled' : 'vstar empty');
-    star.textContent = '\u2605';
-    star.style.animationDelay = `${s * 0.2}s`;
-    starsEl.appendChild(star);
+  if (!isCommunity) {
+    const stars = getStars(state.currentLevel, codeLen);
+    const starsEl = el('div', 'victory-stars');
+    for (let s = 0; s < 3; s++) {
+      const star = el('span', s < stars ? 'vstar filled' : 'vstar empty');
+      star.textContent = '\u2605';
+      star.style.animationDelay = `${s * 0.2}s`;
+      starsEl.appendChild(star);
+    }
+    overlay.appendChild(starsEl);
   }
-  overlay.appendChild(starsEl);
 
   const msg = el('div', 'victory-text', 'Level Complete!');
   overlay.appendChild(msg);
 
+  // Rule reveal
   const reveal = el('div', 'rule-reveal');
   const revealTitle = el('div', 'reveal-title', 'The rule was:');
   reveal.appendChild(revealTitle);
-  const revealText = el('div', 'reveal-text', ruleDescriptions[state.currentLevel]);
+  const revealText = el('div', 'reveal-text');
+  revealText.textContent = isCommunity
+    ? state.communityLevel!.expression
+    : ruleDescriptions[state.currentLevel];
   reveal.appendChild(revealText);
   overlay.appendChild(reveal);
 
@@ -1093,21 +1170,50 @@ function handlePass() {
   codeReveal.innerHTML = `Your solution: <code>${state.codeInput.trim()}</code> <span class="code-length">(${codeLen} chars)</span>`;
   overlay.appendChild(codeReveal);
 
-  const [threeMax, twoMax] = STAR_THRESHOLDS[state.currentLevel];
-  const thresholdHint = el('div', 'threshold-hint');
-  thresholdHint.innerHTML = `\u2605\u2605\u2605 \u2264 ${threeMax} chars &nbsp;\u00b7&nbsp; \u2605\u2605 \u2264 ${twoMax} chars`;
-  overlay.appendChild(thresholdHint);
+  if (!isCommunity) {
+    const [threeMax, twoMax] = STAR_THRESHOLDS[state.currentLevel];
+    const thresholdHint = el('div', 'threshold-hint');
+    thresholdHint.innerHTML = `\u2605\u2605\u2605 \u2264 ${threeMax} chars &nbsp;\u00b7&nbsp; \u2605\u2605 \u2264 ${twoMax} chars`;
+    overlay.appendChild(thresholdHint);
+  }
+
+  // Rating buttons for community levels
+  if (isCommunity && isSignedIn()) {
+    const ratingRow = el('div', 'rating-row');
+    ratingRow.appendChild(el('span', 'rating-label', 'Rate this level:'));
+    const upBtn = el('button', 'rating-btn rating-up', '\u25b2');
+    upBtn.addEventListener('click', () => {
+      api.rateLevel(state.communityLevel!.id, 1).catch(() => {});
+      upBtn.classList.add('rating-selected');
+      downBtn.classList.remove('rating-selected');
+    });
+    ratingRow.appendChild(upBtn);
+    const downBtn = el('button', 'rating-btn rating-down', '\u25bc');
+    downBtn.addEventListener('click', () => {
+      api.rateLevel(state.communityLevel!.id, -1).catch(() => {});
+      downBtn.classList.add('rating-selected');
+      upBtn.classList.remove('rating-selected');
+    });
+    ratingRow.appendChild(downBtn);
+    overlay.appendChild(ratingRow);
+  }
 
   const btnRow = el('div', 'victory-buttons');
 
-  if (stars < 3) {
-    const retryBtn = el('button', 'next-level-btn victory-retry-btn', '\u21bb Try again');
-    retryBtn.addEventListener('click', () => { removeOverlay(); playClick(); startLevel(state.currentLevel); });
-    btnRow.appendChild(retryBtn);
+  if (!isCommunity) {
+    const stars = getStars(state.currentLevel, codeLen);
+    if (stars < 3) {
+      const retryBtn = el('button', 'next-level-btn victory-retry-btn', '\u21bb Try again');
+      retryBtn.addEventListener('click', () => { removeOverlay(); playClick(); startLevel(state.currentLevel); });
+      btnRow.appendChild(retryBtn);
+    }
   }
 
   const nextBtn = el('button', 'next-level-btn');
-  if (state.currentLevel < 19) {
+  if (isCommunity) {
+    nextBtn.textContent = 'Back to Levels';
+    nextBtn.addEventListener('click', () => { removeOverlay(); playClick(); state.communityLevel = null; showCommunityBrowser(); });
+  } else if (state.currentLevel < 19) {
     nextBtn.textContent = 'Next Level \u2192';
     nextBtn.addEventListener('click', () => { removeOverlay(); playClick(); startLevel(state.currentLevel + 1); });
   } else {
@@ -1326,6 +1432,383 @@ function showHelp() {
   app.appendChild(container);
 }
 
+// ——— Community Browser ———
+
+async function showCommunityBrowser(sort: api.LevelSort = 'newest') {
+  clearScreen();
+  state.screen = 'community';
+  const app = document.getElementById('app')!;
+  const container = el('div', 'community-screen');
+
+  const topBar = el('div', 'top-bar');
+  const backBtn = el('button', 'back-btn', '\u2190');
+  backBtn.addEventListener('click', () => { playClick(); state.screen = 'menu'; renderMenu(); });
+  topBar.appendChild(backBtn);
+  const titleEl = el('span', 'level-label', 'Community Levels');
+  topBar.appendChild(titleEl);
+
+  if (isSignedIn()) {
+    const createBtn = el('button', 'create-level-top-btn', '+ Create');
+    createBtn.addEventListener('click', () => { playClick(); showCreateLevel(); });
+    topBar.appendChild(createBtn);
+  }
+  container.appendChild(topBar);
+
+  // Sort tabs
+  const tabs = el('div', 'sort-tabs');
+  const sorts: { key: api.LevelSort; label: string }[] = [
+    { key: 'newest', label: 'Newest' },
+    { key: 'top', label: 'Top Rated' },
+    { key: 'popular', label: 'Most Played' },
+  ];
+  for (const s of sorts) {
+    const tab = el('button', `sort-tab ${s.key === sort ? 'sort-tab-active' : ''}`, s.label);
+    tab.addEventListener('click', () => { playClick(); showCommunityBrowser(s.key); });
+    tabs.appendChild(tab);
+  }
+  container.appendChild(tabs);
+
+  // Level list
+  const listEl = el('div', 'level-list');
+  const loading = el('div', 'loading-text', 'Loading...');
+  listEl.appendChild(loading);
+  container.appendChild(listEl);
+  app.appendChild(container);
+
+  try {
+    const levels = await api.fetchLevels(sort);
+    listEl.innerHTML = '';
+    if (levels.length === 0) {
+      listEl.appendChild(el('div', 'empty-text', 'No levels yet. Be the first to create one!'));
+      return;
+    }
+    for (const level of levels) {
+      const card = el('div', 'level-card');
+      card.addEventListener('click', () => { playClick(); startCommunityLevel(level); });
+
+      const titleRow = el('div', 'level-card-title', level.title);
+      card.appendChild(titleRow);
+
+      const metaRow = el('div', 'level-card-meta');
+      const author = (level.author as any)?.username || 'unknown';
+      metaRow.innerHTML = `by ${author} &middot; \u25b2${level.upvotes} &middot; \u25b6${level.play_count} plays &middot; ${level.solve_count} solved`;
+      card.appendChild(metaRow);
+
+      listEl.appendChild(card);
+    }
+  } catch {
+    listEl.innerHTML = '';
+    listEl.appendChild(el('div', 'empty-text', 'Failed to load levels'));
+  }
+}
+
+// ——— Create Level ———
+
+async function showCreateLevel() {
+  if (!isSignedIn()) { renderMenu(); return; }
+  clearScreen();
+  state.screen = 'create-level';
+  const app = document.getElementById('app')!;
+  const container = el('div', 'create-level-screen');
+
+  const topBar = el('div', 'top-bar');
+  const backBtn = el('button', 'back-btn', '\u2190');
+  backBtn.addEventListener('click', () => { playClick(); showCommunityBrowser(); });
+  topBar.appendChild(backBtn);
+  topBar.appendChild(el('span', 'level-label', 'Create Level'));
+  container.appendChild(topBar);
+
+  const form = el('div', 'create-form');
+
+  // Title
+  const titleLabel = el('div', 'create-label', 'Title');
+  form.appendChild(titleLabel);
+  const titleInput = el('input', 'create-input') as HTMLInputElement;
+  titleInput.type = 'text';
+  titleInput.placeholder = 'Give your level a name';
+  titleInput.maxLength = 60;
+  form.appendChild(titleInput);
+
+  // Expression (the rule)
+  const exprLabel = el('div', 'create-label', 'Rule expression (c, f, s)');
+  form.appendChild(exprLabel);
+  const exprInput = el('textarea', 'code-input create-expr') as HTMLTextAreaElement;
+  exprInput.rows = 2;
+  exprInput.placeholder = 'e.g. f[0] + f[3] == 5';
+  exprInput.maxLength = 120;
+  exprInput.spellcheck = false;
+  exprInput.wrap = 'soft';
+  exprInput.addEventListener('input', () => {
+    exprInput.value = exprInput.value.replace(/\n/g, '');
+  });
+  form.appendChild(exprInput);
+
+  // Preview area
+  const previewArea = el('div', 'create-preview');
+  previewArea.id = 'create-preview';
+  form.appendChild(previewArea);
+
+  // Error
+  const errorEl = el('div', 'code-error');
+  errorEl.id = 'create-error';
+  form.appendChild(errorEl);
+
+  // Buttons
+  const btnRow = el('div', 'create-btn-row');
+  const previewBtn = el('button', 'menu-btn', '\ud83d\udd0d Preview');
+  previewBtn.addEventListener('click', async () => {
+    const expr = exprInput.value.trim();
+    const preview = document.getElementById('create-preview')!;
+    const error = document.getElementById('create-error')!;
+    error.style.display = 'none';
+    preview.innerHTML = '<div class="loading-text">Evaluating...</div>';
+
+    try {
+      const evalResult = await evaluateExpression(expr, ALL_SEQS);
+      if (evalResult.errorCount === ALL_SEQS.length) {
+        error.textContent = evalResult.errorMessage || 'Expression errors on all caterpillars';
+        error.style.display = 'flex';
+        preview.innerHTML = '';
+        return;
+      }
+      if (evalResult.errorCount > 0) {
+        error.textContent = `Expression errors on ${evalResult.errorCount} caterpillars: ${evalResult.errorMessage}`;
+        error.style.display = 'flex';
+        preview.innerHTML = '';
+        return;
+      }
+      const results = evalResult.results as boolean[];
+      const validCount = results.filter(r => r).length;
+      const ratio = validCount / ALL_SEQS.length;
+      if (ratio < 0.05 || ratio > 0.95) {
+        error.textContent = `Too ${ratio < 0.05 ? 'few' : 'many'} valid caterpillars (${validCount}/${ALL_SEQS.length}). Make the rule more balanced.`;
+        error.style.display = 'flex';
+        preview.innerHTML = '';
+        return;
+      }
+
+      preview.innerHTML = `<div class="create-stats">${validCount} valid / ${ALL_SEQS.length - validCount} invalid</div>`;
+
+      // Store results for submission
+      (previewBtn as any)._results = results;
+      (previewBtn as any)._validCount = validCount;
+      publishBtn.style.display = 'block';
+    } catch {
+      error.textContent = 'Syntax error';
+      error.style.display = 'flex';
+      preview.innerHTML = '';
+    }
+  });
+  btnRow.appendChild(previewBtn);
+
+  const publishBtn = el('button', 'menu-btn menu-btn-primary', '\ud83d\ude80 Publish');
+  publishBtn.style.display = 'none';
+  publishBtn.addEventListener('click', async () => {
+    const title = titleInput.value.trim();
+    const expr = exprInput.value.trim();
+    const error = document.getElementById('create-error')!;
+
+    if (title.length < 3) {
+      error.textContent = 'Title must be at least 3 characters';
+      error.style.display = 'flex';
+      return;
+    }
+
+    const results = (previewBtn as any)._results as boolean[];
+    const validCount = (previewBtn as any)._validCount as number;
+    if (!results) {
+      error.textContent = 'Preview the rule first';
+      error.style.display = 'flex';
+      return;
+    }
+
+    const signature = buildSignature(results);
+    const canonicalSig = computeCanonicalSignature(results);
+
+    // Check duplicate
+    const dup = await api.checkDuplicate(canonicalSig);
+    if (dup) {
+      error.textContent = `A level with this rule already exists: "${dup.title}"`;
+      error.style.display = 'flex';
+      return;
+    }
+
+    publishBtn.textContent = 'Publishing...';
+    publishBtn.classList.add('submitting');
+
+    try {
+      await api.createLevel({
+        title,
+        expression: expr,
+        signature,
+        canonical_signature: canonicalSig,
+        valid_count: validCount,
+        author_best_length: expr.length, // author's expression is also a solution
+      });
+      showCommunityBrowser();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to publish';
+      error.textContent = msg;
+      error.style.display = 'flex';
+      publishBtn.textContent = '\ud83d\ude80 Publish';
+      publishBtn.classList.remove('submitting');
+    }
+  });
+  btnRow.appendChild(publishBtn);
+
+  form.appendChild(btnRow);
+  container.appendChild(form);
+  app.appendChild(container);
+}
+
+// ——— Community Level Play ———
+
+async function startCommunityLevel(level: CommunityLevel) {
+  state.communityLevel = level;
+  state.currentLevel = -1;
+  state.inputChain = [];
+  state.codeInput = '';
+  state.codeError = null;
+  state.codeSubmitting = false;
+  state.testedCount = 0;
+
+  // Evaluate the level's expression to get the rule
+  const evalResult = await evaluateExpression(level.expression, ALL_SEQS);
+  const resultMap = new Map<string, boolean>();
+  ALL_SEQS.forEach((seq, i) => {
+    resultMap.set(seq.join(','), evalResult.results[i] ?? false);
+  });
+
+  state.currentRule = (seq: number[]) => resultMap.get(seq.join(',')) ?? false;
+
+  const { valid, invalid } = getValidInvalid(state.currentRule);
+  state.valids = valid;
+  state.invalids = invalid;
+  state.validHistory = getN(7, valid);
+  state.invalidHistory = getN(7, invalid);
+
+  // Increment play count
+  api.incrementPlayCount(level.id).catch(() => {});
+
+  state.screen = 'level';
+  renderLevel();
+}
+
+// ——— Profile ———
+
+async function showProfile() {
+  if (!isSignedIn()) { renderMenu(); return; }
+  clearScreen();
+  state.screen = 'profile';
+  const app = document.getElementById('app')!;
+  const container = el('div', 'profile-screen');
+
+  const topBar = el('div', 'top-bar');
+  const backBtn = el('button', 'back-btn', '\u2190');
+  backBtn.addEventListener('click', () => { playClick(); state.screen = 'menu'; renderMenu(); });
+  topBar.appendChild(backBtn);
+  topBar.appendChild(el('span', 'level-label', 'Profile'));
+  container.appendChild(topBar);
+
+  const content = el('div', 'profile-content');
+  content.appendChild(el('div', 'loading-text', 'Loading...'));
+  container.appendChild(content);
+  app.appendChild(container);
+
+  try {
+    const user = getUser()!;
+    const profile = await api.fetchProfile(user.id);
+    content.innerHTML = '';
+
+    if (!profile) {
+      content.appendChild(el('div', 'empty-text', 'Profile not found'));
+      return;
+    }
+
+    const header = el('div', 'profile-header');
+    if (profile.avatar_url) {
+      const img = document.createElement('img');
+      img.src = profile.avatar_url;
+      img.className = 'profile-avatar';
+      header.appendChild(img);
+    }
+    header.appendChild(el('div', 'profile-name', profile.username));
+    content.appendChild(header);
+
+    const stats = el('div', 'profile-stats');
+    stats.innerHTML = `
+      <div class="stat-item"><div class="stat-value">${profile.builtin_solved}</div><div class="stat-label">Built-in solved</div></div>
+      <div class="stat-item"><div class="stat-value">${profile.builtin_stars} \u2605</div><div class="stat-label">Stars</div></div>
+      <div class="stat-item"><div class="stat-value">${profile.community_solved}</div><div class="stat-label">Community solved</div></div>
+      <div class="stat-item"><div class="stat-value">${profile.levels_created}</div><div class="stat-label">Levels created</div></div>
+    `;
+    content.appendChild(stats);
+  } catch {
+    content.innerHTML = '';
+    content.appendChild(el('div', 'empty-text', 'Failed to load profile'));
+  }
+}
+
+// ——— Leaderboard ———
+
+async function showLeaderboard() {
+  clearScreen();
+  state.screen = 'leaderboard';
+  const app = document.getElementById('app')!;
+  const container = el('div', 'leaderboard-screen');
+
+  const topBar = el('div', 'top-bar');
+  const backBtn = el('button', 'back-btn', '\u2190');
+  backBtn.addEventListener('click', () => { playClick(); state.screen = 'menu'; renderMenu(); });
+  topBar.appendChild(backBtn);
+  topBar.appendChild(el('span', 'level-label', 'Leaderboard'));
+  container.appendChild(topBar);
+
+  const content = el('div', 'leaderboard-content');
+  content.appendChild(el('div', 'loading-text', 'Loading...'));
+  container.appendChild(content);
+  app.appendChild(container);
+
+  try {
+    const players = await api.fetchLeaderboard();
+    content.innerHTML = '';
+
+    if (players.length === 0) {
+      content.appendChild(el('div', 'empty-text', 'No players yet'));
+      return;
+    }
+
+    for (let i = 0; i < players.length; i++) {
+      const p = players[i];
+      const row = el('div', 'lb-row');
+
+      const rank = el('span', 'lb-rank', `#${i + 1}`);
+      row.appendChild(rank);
+
+      if (p.avatar_url) {
+        const img = document.createElement('img');
+        img.src = p.avatar_url;
+        img.className = 'lb-avatar';
+        row.appendChild(img);
+      }
+
+      const name = el('span', 'lb-name', p.username);
+      row.appendChild(name);
+
+      const stars = el('span', 'lb-stars', `${p.builtin_stars} \u2605`);
+      row.appendChild(stars);
+
+      const community = el('span', 'lb-community', `${p.community_solved} solved`);
+      row.appendChild(community);
+
+      content.appendChild(row);
+    }
+  } catch {
+    content.innerHTML = '';
+    content.appendChild(el('div', 'empty-text', 'Failed to load leaderboard'));
+  }
+}
+
 function goToChooser() {
   state.screen = 'chooser';
   state.inputChain = [];
@@ -1409,8 +1892,9 @@ function renderSharedProgress(data: Record<string, { s: number; l: number }>) {
   state.progress = savedProgress;
 }
 
-export function init() {
+export async function init() {
   initSignatures();
+  await initAuth();
   if (!tryShowSharedProgress()) {
     renderMenu();
   }
