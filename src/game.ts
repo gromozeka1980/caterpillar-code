@@ -874,11 +874,6 @@ async function submitCode() {
     updateErrorDisplay();
     return;
   }
-  if (expr.includes('#')) {
-    state.codeError = 'Comments (#) are not allowed';
-    updateErrorDisplay();
-    return;
-  }
 
   state.codeSubmitting = true;
   state.codeError = null;
