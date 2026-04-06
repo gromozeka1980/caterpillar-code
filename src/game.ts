@@ -776,6 +776,12 @@ function renderGameInput() {
       submitCode();
     }
   });
+  codeInput.addEventListener('focus', () => {
+    // Wait for mobile keyboard to appear, then scroll input into view
+    setTimeout(() => {
+      codeInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 350);
+  });
   codeInputRow.appendChild(codeInput);
 
   const charCounter = el('span', 'char-counter');
@@ -1353,6 +1359,8 @@ export function init() {
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
     resizeTimer = window.setTimeout(() => {
+      // Don't re-render while code input is focused (mobile keyboard)
+      if (document.activeElement?.classList.contains('code-input')) return;
       if (state.screen === 'menu') renderMenu();
       else if (state.screen === 'chooser') renderChooser();
       else if (state.screen === 'level') renderLevel();
