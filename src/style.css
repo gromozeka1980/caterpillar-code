@@ -176,6 +176,29 @@ html, body {
   color: var(--gold);
 }
 
+.share-btn {
+  padding: 8px 20px;
+  font-size: 0.85rem;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 20px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  align-self: center;
+  margin: 8px 0;
+}
+
+.share-btn:hover {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+.help-try-btn {
+  margin-top: 20px;
+  align-self: center;
+}
+
 .shared-stats {
   text-align: center;
   font-size: 1rem;
@@ -825,6 +848,9 @@ html, body {
   padding: 8px 10px;
   outline: none;
   transition: border-color 0.2s, box-shadow 0.2s;
+  resize: none;
+  overflow: hidden;
+  line-height: 1.4;
 }
 
 .code-input:focus {
@@ -1110,6 +1136,34 @@ html, body {
 .hl-invalid {
   color: var(--invalid);
   font-weight: 600;
+}
+
+.help-example {
+  background: rgba(255,255,255,0.04);
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin: 16px 0 8px;
+}
+
+.help-example-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--gold);
+  margin-bottom: 8px;
+}
+
+.help-example-text {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 6px 0;
+}
+
+.help-example-cats {
+  display: flex;
+  gap: 12px;
+  margin: 6px 0;
+  flex-wrap: wrap;
 }
 
 .help-inspired {

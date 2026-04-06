@@ -311,20 +311,9 @@ function renderMenu() {
   playBtn.addEventListener('click', () => { playClick(); goToChooser(); });
   btnCol.appendChild(playBtn);
 
-  const tutorialBtn = el('button', 'menu-btn', '\ud83c\udf93 Tutorial');
-  tutorialBtn.addEventListener('click', () => { playClick(); startTutorial(); });
-  btnCol.appendChild(tutorialBtn);
-
   const helpBtn = el('button', 'menu-btn', '\u2753 How to play');
   helpBtn.addEventListener('click', () => { playClick(); showHelp(); });
   btnCol.appendChild(helpBtn);
-
-  // Share progress button (only show if any level passed)
-  if (state.progress.size > 0) {
-    const shareBtn = el('button', 'menu-btn menu-btn-share', '\ud83d\udcca Share progress');
-    shareBtn.addEventListener('click', () => { playClick(); shareProgress(shareBtn); });
-    btnCol.appendChild(shareBtn);
-  }
 
   container.appendChild(btnCol);
 
@@ -391,6 +380,13 @@ function renderChooser() {
 
   pathWrap.appendChild(path);
   container.appendChild(pathWrap);
+
+  // Share button (only if any level passed)
+  if (state.progress.size > 0) {
+    const shareBtn = el('button', 'share-btn', '\ud83d\udcca Share progress');
+    shareBtn.addEventListener('click', () => { playClick(); shareProgress(shareBtn); });
+    container.appendChild(shareBtn);
+  }
 
   app.appendChild(container);
 }
@@ -575,7 +571,16 @@ function renderLevel() {
   // Top bar
   const topBar = el('div', 'top-bar');
   const backBtn = el('button', 'back-btn', '\u2190');
-  backBtn.addEventListener('click', () => { playClick(); if (state.isTutorial) state.isTutorial = false; goToChooser(); });
+  backBtn.addEventListener('click', () => {
+    playClick();
+    if (state.isTutorial) {
+      state.isTutorial = false;
+      state.screen = 'menu';
+      renderMenu();
+    } else {
+      goToChooser();
+    }
+  });
   topBar.appendChild(backBtn);
   const levelLabel = el('span', 'level-label', state.isTutorial ? 'Tutorial' : `Level ${state.currentLevel + 1}`);
   topBar.appendChild(levelLabel);
@@ -757,27 +762,37 @@ function renderGameInput() {
 
   // Code input row
   const codeInputRow = el('div', 'code-input-row');
-  const codeInput = el('input', 'code-input') as HTMLInputElement;
-  codeInput.type = 'text';
+  const codeInput = el('textarea', 'code-input') as HTMLTextAreaElement;
+  codeInput.rows = 1;
   codeInput.placeholder = 'e.g. f[0] > f[1]';
   codeInput.maxLength = MAX_CODE_LENGTH;
   codeInput.value = state.codeInput;
   codeInput.spellcheck = false;
   codeInput.autocomplete = 'off';
+  codeInput.wrap = 'soft';
+
+  const autoResize = () => {
+    codeInput.style.height = 'auto';
+    codeInput.style.height = codeInput.scrollHeight + 'px';
+  };
+
   codeInput.addEventListener('input', () => {
+    // Strip newlines — keep it a one-liner
+    const clean = codeInput.value.replace(/\n/g, '');
+    if (clean !== codeInput.value) codeInput.value = clean;
     state.codeInput = codeInput.value;
     state.codeError = null;
     updateCharCounter();
     updateErrorDisplay();
+    autoResize();
   });
   codeInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !state.codeSubmitting) {
+    if (e.key === 'Enter') {
       e.preventDefault();
-      submitCode();
+      if (!state.codeSubmitting) submitCode();
     }
   });
   codeInput.addEventListener('focus', () => {
-    // Wait for mobile keyboard to appear, then scroll input into view
     setTimeout(() => {
       codeInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 350);
@@ -1258,9 +1273,45 @@ function showHelp() {
     </ul>
     <p>Your expression must return <code>True</code> for valid caterpillars and <code>False</code> for invalid ones.</p>
     <p>Earn up to <strong>3 stars</strong> based on how short your expression is \u2014 the shorter, the better!</p>
-    <p class="help-inspired">Inspired by <em>Zendo</em> and <em>Eleusis</em> \u2014 classic inductive reasoning games.</p>
   `;
   container.appendChild(text);
+
+  // Worked example
+  const exampleSection = el('div', 'help-example');
+  const exTitle = el('div', 'help-example-title', 'Example');
+  exampleSection.appendChild(exTitle);
+
+  const exText = el('div', 'help-example-text');
+  exText.innerHTML = 'Suppose the rule is <em>"exactly 3 distinct colors"</em>. These caterpillars would be <span class="hl-valid">valid</span>:';
+  exampleSection.appendChild(exText);
+
+  const validRow = el('div', 'help-example-cats');
+  validRow.appendChild(createCaterpillarCanvas([0, 1, 2], 110, 22, 'forward', 'happy'));
+  validRow.appendChild(createCaterpillarCanvas([3, 0, 3, 1, 0], 110, 22, 'forward', 'happy'));
+  exampleSection.appendChild(validRow);
+
+  const exText2 = el('div', 'help-example-text');
+  exText2.innerHTML = 'And these would be <span class="hl-invalid">invalid</span>:';
+  exampleSection.appendChild(exText2);
+
+  const invalidRow = el('div', 'help-example-cats');
+  invalidRow.appendChild(createCaterpillarCanvas([0, 0, 1], 110, 22, 'forward', 'sad'));
+  invalidRow.appendChild(createCaterpillarCanvas([0, 1, 2, 3], 110, 22, 'forward', 'sad'));
+  exampleSection.appendChild(invalidRow);
+
+  const exSolution = el('div', 'help-example-text');
+  exSolution.innerHTML = 'The winning expression: <code>len(set(c))==3</code>';
+  exampleSection.appendChild(exSolution);
+
+  container.appendChild(exampleSection);
+
+  const inspired = el('p', 'help-inspired');
+  inspired.innerHTML = 'Inspired by <em>Zendo</em> and <em>Eleusis</em> \u2014 classic inductive reasoning games.';
+  container.appendChild(inspired);
+
+  const tryBtn = el('button', 'menu-btn menu-btn-primary help-try-btn', '\ud83c\udf93 Try the tutorial');
+  tryBtn.addEventListener('click', () => { playClick(); startTutorial(); });
+  container.appendChild(tryBtn);
 
   app.appendChild(container);
 }
