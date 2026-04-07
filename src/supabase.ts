@@ -25,15 +25,31 @@ export function isSupabaseAvailable(): boolean {
 export async function initAuth(): Promise<User | null> {
   if (!supabase) return null;
 
-  // Wait for auth state to be resolved (handles OAuth callback hash)
-  return new Promise<User | null>((resolve) => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      currentUser = session?.user ?? null;
-      resolve(currentUser);
-    });
-    // Keep subscription alive for future changes
-    void subscription;
+  // Subscribe to auth changes (stays active for the lifetime of the app)
+  supabase.auth.onAuthStateChange((_event, session) => {
+    currentUser = session?.user ?? null;
   });
+
+  // Check for existing session
+  const { data: { session } } = await supabase.auth.getSession();
+  currentUser = session?.user ?? null;
+
+  // If URL has OAuth hash tokens but no session yet, wait briefly for processing
+  if (!currentUser && window.location.hash.includes('access_token')) {
+    await new Promise<void>((resolve) => {
+      const check = () => {
+        if (currentUser) { resolve(); return; }
+        setTimeout(check, 100);
+      };
+      setTimeout(check, 100);
+      // Don't wait forever
+      setTimeout(resolve, 3000);
+    });
+    // Clean up the hash
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
+
+  return currentUser;
 }
 
 export async function signInWithGitHub() {
