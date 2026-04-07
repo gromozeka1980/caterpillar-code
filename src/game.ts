@@ -1812,6 +1812,7 @@ async function showLeaderboard() {
     // Column headers
     const header = el('div', 'lb-row lb-header');
     header.appendChild(el('span', 'lb-rank', ''));
+    header.appendChild(el('span', '')); // avatar spacer
     header.appendChild(el('span', 'lb-name', 'Player'));
     header.appendChild(el('span', 'lb-stars', 'Campaign'));
     header.appendChild(el('span', 'lb-community', 'Community'));
@@ -1829,6 +1830,8 @@ async function showLeaderboard() {
         img.src = p.avatar_url;
         img.className = 'lb-avatar';
         row.appendChild(img);
+      } else {
+        row.appendChild(el('span', '')); // avatar placeholder
       }
 
       const name = el('span', 'lb-name', p.username);

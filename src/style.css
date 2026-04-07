@@ -1527,9 +1527,10 @@ html, body {
 }
 
 .lb-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 32px 28px 1fr 70px 70px;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 10px 8px;
   border-bottom: 1px solid rgba(255,255,255,0.04);
 }
@@ -1572,11 +1573,13 @@ html, body {
 .lb-stars {
   font-size: 0.82rem;
   color: var(--gold);
+  text-align: right;
 }
 
 .lb-community {
   font-size: 0.75rem;
   color: var(--text-muted);
+  text-align: right;
 }
 
 /* ——— Responsive ——— */
