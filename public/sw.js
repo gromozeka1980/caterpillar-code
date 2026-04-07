@@ -1,4 +1,4 @@
-const CACHE_NAME = 'caterpillar-code-v1';
+const CACHE_NAME = 'caterpillar-code-v2';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
