@@ -10,7 +10,7 @@ import { calcGameLayout, calcChooserLayout, type GameLayout } from './layout';
 import { initSignatures, ALL_SEQS, buildSignature, compareSignatures, isConsistentWithExamples } from './signatures';
 import { evaluateExpression, isPyodideReady } from './pyodide';
 import { getStars, MAX_CODE_LENGTH, STAR_THRESHOLDS } from './starThresholds';
-import { initAuth, getUser, isSignedIn, signInWithGitHub, signInWithGoogle, signOut, type CommunityLevel } from './supabase';
+import { initAuth, getUser, isSignedIn, signInWithGitHub, signInWithGoogle, signOut, setAuthChangeCallback, type CommunityLevel } from './supabase';
 import { computeCanonicalSignature } from './signatures';
 import * as api from './api';
 
@@ -1942,6 +1942,14 @@ async function renderSharedProgress(userId: string) {
 export async function init() {
   initSignatures();
   await initAuth();
+
+  // Re-render menu when auth state changes (e.g. after OAuth redirect)
+  setAuthChangeCallback(() => {
+    if (isSignedIn() && state.progress.size > 0) {
+      syncProgressToServer();
+    }
+    if (state.screen === 'menu') renderMenu();
+  });
 
   // Sync localStorage progress to server on sign-in
   if (isSignedIn() && state.progress.size > 0) {

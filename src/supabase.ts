@@ -1,12 +1,9 @@
 import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+const SUPABASE_URL = 'https://rralgdsnidvmivnxmofv.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJyYWxnZHNuaWR2bWl2bnhtb2Z2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0OTg4ODEsImV4cCI6MjA5MTA3NDg4MX0.3Jc79TFlq4ou7BtKh0Xlo1fC2ruX-5HAM7rUFCFDCOM';
 
-export const supabase: SupabaseClient | null =
-  SUPABASE_URL && SUPABASE_ANON_KEY
-    ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-    : null;
+export const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let currentUser: User | null = null;
 
@@ -22,32 +19,31 @@ export function isSupabaseAvailable(): boolean {
   return supabase !== null;
 }
 
+/** Callback to re-render when auth state changes */
+let onAuthChange: (() => void) | null = null;
+
+export function setAuthChangeCallback(cb: () => void) {
+  onAuthChange = cb;
+}
+
 export async function initAuth(): Promise<User | null> {
   if (!supabase) return null;
 
-  // Subscribe to auth changes (stays active for the lifetime of the app)
+  // Subscribe to auth changes
   supabase.auth.onAuthStateChange((_event, session) => {
+    const wasSignedIn = currentUser !== null;
     currentUser = session?.user ?? null;
+    const isNowSignedIn = currentUser !== null;
+
+    // If auth state actually changed, re-render
+    if (wasSignedIn !== isNowSignedIn && onAuthChange) {
+      onAuthChange();
+    }
   });
 
   // Check for existing session
   const { data: { session } } = await supabase.auth.getSession();
   currentUser = session?.user ?? null;
-
-  // If URL has OAuth hash tokens but no session yet, wait briefly for processing
-  if (!currentUser && window.location.hash.includes('access_token')) {
-    await new Promise<void>((resolve) => {
-      const check = () => {
-        if (currentUser) { resolve(); return; }
-        setTimeout(check, 100);
-      };
-      setTimeout(check, 100);
-      // Don't wait forever
-      setTimeout(resolve, 3000);
-    });
-    // Clean up the hash
-    window.history.replaceState(null, '', window.location.pathname + window.location.search);
-  }
 
   return currentUser;
 }
