@@ -24,14 +24,16 @@ export function isSupabaseAvailable(): boolean {
 
 export async function initAuth(): Promise<User | null> {
   if (!supabase) return null;
-  const { data: { session } } = await supabase.auth.getSession();
-  currentUser = session?.user ?? null;
 
-  supabase.auth.onAuthStateChange((_event, session) => {
-    currentUser = session?.user ?? null;
+  // Wait for auth state to be resolved (handles OAuth callback hash)
+  return new Promise<User | null>((resolve) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      currentUser = session?.user ?? null;
+      resolve(currentUser);
+    });
+    // Keep subscription alive for future changes
+    void subscription;
   });
-
-  return currentUser;
 }
 
 export async function signInWithGitHub() {
