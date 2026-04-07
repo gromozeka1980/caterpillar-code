@@ -179,9 +179,12 @@ export async function fetchBuiltinCompletions(userId: string): Promise<{ level_i
 // ——— My level count (for auto-naming) ———
 
 export async function fetchMyLevelCount(): Promise<number> {
+  const userId = (await supabase.auth.getUser()).data.user?.id;
+  if (!userId) return 0;
   const { count, error } = await supabase
     .from('levels')
     .select('*', { count: 'exact', head: true })
+    .eq('author_id', userId)
     .eq('status', 'active');
   if (error) return 0;
   return count ?? 0;

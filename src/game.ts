@@ -1190,7 +1190,9 @@ function handlePass() {
   overlay.appendChild(reveal);
 
   const codeReveal = el('div', 'code-reveal');
-  codeReveal.innerHTML = `Your solution: <code>${state.codeInput.trim()}</code> <span class="code-length">(${codeLen} chars)</span>`;
+  const codeEl = document.createElement('code');
+  codeEl.textContent = state.codeInput.trim();
+  codeReveal.append('Your solution: ', codeEl, ` (${codeLen} chars)`);
   overlay.appendChild(codeReveal);
 
   if (!isCommunity) {
@@ -1514,7 +1516,7 @@ async function showCommunityBrowser(sort: api.LevelSort = 'newest') {
 
       const metaRow = el('div', 'level-card-meta');
       const author = (level.author as any)?.username || 'unknown';
-      metaRow.innerHTML = `by ${author} &middot; \u25b2${level.upvotes} &middot; \u25b6${level.play_count} plays &middot; ${level.solve_count} solved`;
+      metaRow.textContent = `by ${author} \u00b7 \u25b2${level.upvotes} \u00b7 \u25b6${level.play_count} plays \u00b7 ${level.solve_count} solved`;
       card.appendChild(metaRow);
 
       listEl.appendChild(card);
@@ -1570,6 +1572,9 @@ async function showCreateLevel() {
   form.appendChild(errorEl);
 
   // Buttons
+  let previewedResults: boolean[] | null = null;
+  let previewedValidCount = 0;
+
   const btnRow = el('div', 'create-btn-row');
   const previewBtn = el('button', 'menu-btn', '\ud83d\udd0d Preview');
   previewBtn.addEventListener('click', async () => {
@@ -1605,9 +1610,8 @@ async function showCreateLevel() {
 
       preview.innerHTML = `<div class="create-stats">${validCount} valid / ${ALL_SEQS.length - validCount} invalid</div>`;
 
-      // Store results for submission
-      (previewBtn as any)._results = results;
-      (previewBtn as any)._validCount = validCount;
+      previewedResults = results;
+      previewedValidCount = validCount;
       publishBtn.style.display = 'block';
     } catch {
       error.textContent = 'Syntax error';
@@ -1623,16 +1627,14 @@ async function showCreateLevel() {
     const expr = exprInput.value.trim();
     const error = document.getElementById('create-error')!;
 
-    const results = (previewBtn as any)._results as boolean[];
-    const validCount = (previewBtn as any)._validCount as number;
-    if (!results) {
+    if (!previewedResults) {
       error.textContent = 'Preview the rule first';
       error.style.display = 'flex';
       return;
     }
 
-    const signature = buildSignature(results);
-    const canonicalSig = computeCanonicalSignature(results);
+    const signature = buildSignature(previewedResults);
+    const canonicalSig = computeCanonicalSignature(previewedResults);
 
     // Check duplicate
     const dup = await api.checkDuplicate(canonicalSig);
@@ -1657,7 +1659,7 @@ async function showCreateLevel() {
         expression: expr,
         signature,
         canonical_signature: canonicalSig,
-        valid_count: validCount,
+        valid_count: previewedValidCount,
         author_best_length: expr.length, // author's expression is also a solution
       });
       showCommunityBrowser();
