@@ -22,6 +22,7 @@ interface LevelProgress {
   passed: boolean;
   stars: number;       // 1-3
   bestLength: number;  // shortest passing expression length
+  bestExpression?: string; // shortest passing expression
 }
 
 interface GameState {
@@ -376,34 +377,38 @@ function renderMenu() {
 
 // ——— Share Progress ———
 
-function encodeProgress(): string {
-  // Encode as: level(1byte) + stars(2bits) + bestLength(7bits) packed
-  // Simple approach: JSON → base64
-  const data: Record<number, { s: number; l: number }> = {};
-  for (const [level, prog] of state.progress) {
-    if (prog.passed) {
-      data[level] = { s: prog.stars, l: prog.bestLength ?? 0 };
-    }
-  }
-  return btoa(JSON.stringify(data));
-}
-
-function buildShareUrl(): string {
-  const encoded = encodeProgress();
-  const base = window.location.href.split('?')[0].split('#')[0];
-  return `${base}?p=${encoded}`;
-}
-
 function shareProgress(btn: HTMLElement) {
-  const url = buildShareUrl();
+  if (!isSignedIn()) return;
+  const userId = getUser()!.id;
+  const base = window.location.href.split('?')[0].split('#')[0];
+  const url = `${base}?user=${userId}`;
   if (navigator.clipboard) {
     navigator.clipboard.writeText(url).then(() => {
       btn.textContent = '\u2705 Link copied!';
       setTimeout(() => { btn.textContent = '\ud83d\udcca Share progress'; }, 2000);
     });
   } else {
-    // Fallback
     prompt('Copy this link to share your progress:', url);
+  }
+}
+
+// ——— Sync localStorage progress to Supabase ———
+
+async function syncProgressToServer() {
+  if (!isSignedIn()) return;
+  const completions: { level_index: number; stars: number; best_length: number; expression?: string }[] = [];
+  for (const [level, prog] of state.progress) {
+    if (prog.passed) {
+      completions.push({
+        level_index: level,
+        stars: prog.stars,
+        best_length: prog.bestLength ?? 0,
+        expression: prog.bestExpression,
+      });
+    }
+  }
+  if (completions.length > 0) {
+    await api.syncBuiltinProgress(completions).catch(() => {});
   }
 }
 
@@ -435,8 +440,8 @@ function renderChooser() {
   pathWrap.appendChild(path);
   container.appendChild(pathWrap);
 
-  // Share button (only if any level passed)
-  if (state.progress.size > 0) {
+  // Share button (only for signed-in users with progress)
+  if (isSignedIn() && state.progress.size > 0) {
     const shareBtn = el('button', 'share-btn', '\ud83d\udcca Share progress');
     shareBtn.addEventListener('click', () => { playClick(); shareProgress(shareBtn); });
     container.appendChild(shareBtn);
@@ -599,8 +604,11 @@ function handleTutorialPass() {
 function startLevel(levelId: number) {
   state.currentLevel = levelId;
   state.currentRule = rules[levelId];
+  state.communityLevel = null;
   state.inputChain = [];
-  state.codeInput = '';
+  // Pre-fill with last successful solution if available
+  const prevProgress = state.progress.get(levelId);
+  state.codeInput = prevProgress?.bestExpression ?? '';
   state.codeError = null;
   state.codeSubmitting = false;
   state.testedCount = 0;
@@ -1005,11 +1013,13 @@ async function submitCode() {
 
     if (compareSignatures(playerSig, ruleSig)) {
       // Correct!
+      state.codeSubmitting = false;
       if (state.isTutorial) {
         handleTutorialPass();
       } else {
         handlePass();
       }
+      return; // Don't run finally — screen has changed
     } else {
       // Wrong — provide feedback
       handleWrongSubmission(playerResults, ruleResults, seqs);
@@ -1024,12 +1034,12 @@ async function submitCode() {
     state.codeError = match ? `${match[1]}: ${match[2]}` : 'Syntax error';
     updateErrorDisplay();
     playWrong();
-  } finally {
-    state.codeSubmitting = false;
-    if (submitBtn) {
-      submitBtn.textContent = '\u25b6 Check solution';
-      submitBtn.classList.remove('submitting');
-    }
+  }
+  state.codeSubmitting = false;
+  const btn = document.getElementById('code-submit-btn');
+  if (btn) {
+    btn.textContent = '\u25b6 Check solution';
+    btn.classList.remove('submitting');
   }
 }
 
@@ -1121,12 +1131,25 @@ function handlePass() {
     const bestStars = Math.max(existing?.stars ?? 0, stars);
     const bestLength = Math.min(existing?.bestLength ?? Infinity, codeLen);
 
+    const bestExpr = codeLen <= (existing?.bestLength ?? Infinity)
+      ? state.codeInput.trim()
+      : existing?.bestExpression;
     state.progress.set(state.currentLevel, {
       passed: true,
       stars: bestStars,
       bestLength,
+      bestExpression: bestExpr,
     });
     saveProgress();
+    // Sync to server
+    if (isSignedIn()) {
+      api.syncBuiltinProgress([{
+        level_index: state.currentLevel,
+        stars: bestStars,
+        best_length: bestLength,
+        expression: bestExpr,
+      }]).catch(() => {});
+    }
   }
 
   // Submit solution for community levels
@@ -1656,11 +1679,27 @@ async function showCreateLevel() {
 // ——— Community Level Play ———
 
 async function startCommunityLevel(level: CommunityLevel) {
+  // Show loading screen immediately
+  clearScreen();
+  const app = document.getElementById('app')!;
+  const loadingScreen = el('div', 'menu-screen');
+  loadingScreen.appendChild(el('div', 'loading-text', 'Loading level...'));
+  app.appendChild(loadingScreen);
+
   state.communityLevel = level;
   state.currentLevel = -1;
   state.inputChain = [];
-  state.codeInput = '';
   state.codeError = null;
+
+  // Pre-fill with previous solution if available
+  let prevExpr = '';
+  if (isSignedIn()) {
+    try {
+      const prevSolution = await api.fetchMySolution(level.id);
+      if (prevSolution) prevExpr = prevSolution.expression;
+    } catch { /* ignore */ }
+  }
+  state.codeInput = prevExpr;
   state.codeSubmitting = false;
   state.testedCount = 0;
 
@@ -1815,18 +1854,13 @@ function goToChooser() {
 
 function tryShowSharedProgress(): boolean {
   const params = new URLSearchParams(window.location.search);
-  const encoded = params.get('p');
-  if (!encoded) return false;
-  try {
-    const data: Record<string, { s: number; l: number }> = JSON.parse(atob(encoded));
-    renderSharedProgress(data);
-    return true;
-  } catch {
-    return false;
-  }
+  const userId = params.get('user');
+  if (!userId) return false;
+  renderSharedProgress(userId);
+  return true;
 }
 
-function renderSharedProgress(data: Record<string, { s: number; l: number }>) {
+async function renderSharedProgress(userId: string) {
   clearScreen();
   const app = document.getElementById('app')!;
   const container = el('div', 'chooser-screen');
@@ -1834,21 +1868,29 @@ function renderSharedProgress(data: Record<string, { s: number; l: number }>) {
   const topBar = el('div', 'top-bar');
   const backBtn = el('button', 'back-btn', '\u2190');
   backBtn.addEventListener('click', () => {
-    // Strip ?p= from URL and go to own menu
     window.history.replaceState(null, '', window.location.pathname);
     state.screen = 'menu';
     renderMenu();
   });
   topBar.appendChild(backBtn);
-  const label = el('span', 'level-label', 'Shared progress');
+  const label = el('span', 'level-label', 'Loading...');
   topBar.appendChild(label);
   container.appendChild(topBar);
+  app.appendChild(container);
 
-  // Build a temporary progress map for rendering
+  // Fetch profile and completions
+  const [profile, completions] = await Promise.all([
+    api.fetchProfile(userId),
+    api.fetchBuiltinCompletions(userId),
+  ]);
+
+  label.textContent = profile ? `${profile.username}'s progress` : 'Shared progress';
+
+  // Build temporary progress map for rendering
   const savedProgress = state.progress;
   const sharedProgress = new Map<number, LevelProgress>();
-  for (const [lvl, info] of Object.entries(data)) {
-    sharedProgress.set(Number(lvl), { passed: true, stars: info.s, bestLength: info.l });
+  for (const c of completions) {
+    sharedProgress.set(c.level_index, { passed: true, stars: c.stars, bestLength: c.best_length });
   }
   state.progress = sharedProgress;
 
@@ -1862,7 +1904,7 @@ function renderSharedProgress(data: Record<string, { s: number; l: number }>) {
     renderChooserPortrait(path, L);
   }
 
-  // Disable all clicks on segments (read-only)
+  // Disable all clicks (read-only)
   path.querySelectorAll('.seg').forEach(seg => {
     (seg as HTMLElement).style.pointerEvents = 'none';
     (seg as HTMLElement).style.cursor = 'default';
@@ -1871,14 +1913,12 @@ function renderSharedProgress(data: Record<string, { s: number; l: number }>) {
   pathWrap.appendChild(path);
   container.appendChild(pathWrap);
 
-  // Stats summary
+  // Stats
   const passed = sharedProgress.size;
   const totalStars = [...sharedProgress.values()].reduce((a, p) => a + p.stars, 0);
   const stats = el('div', 'shared-stats');
   stats.innerHTML = `${passed}/20 levels \u00b7 ${totalStars} \u2605`;
   container.appendChild(stats);
-
-  app.appendChild(container);
 
   // Restore own progress
   state.progress = savedProgress;
@@ -1887,6 +1927,12 @@ function renderSharedProgress(data: Record<string, { s: number; l: number }>) {
 export async function init() {
   initSignatures();
   await initAuth();
+
+  // Sync localStorage progress to server on sign-in
+  if (isSignedIn() && state.progress.size > 0) {
+    syncProgressToServer();
+  }
+
   if (!tryShowSharedProgress()) {
     renderMenu();
   }

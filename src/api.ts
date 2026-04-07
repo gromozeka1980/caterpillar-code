@@ -165,6 +165,17 @@ export async function syncBuiltinProgress(
   if (error) throw error;
 }
 
+// ——— Builtin completions ———
+
+export async function fetchBuiltinCompletions(userId: string): Promise<{ level_index: number; stars: number; best_length: number }[]> {
+  const { data, error } = await supabase
+    .from('builtin_completions')
+    .select('level_index, stars, best_length')
+    .eq('user_id', userId);
+  if (error) return [];
+  return data;
+}
+
 // ——— My level count (for auto-naming) ———
 
 export async function fetchMyLevelCount(): Promise<number> {
