@@ -3,12 +3,14 @@ const CACHE_NAME = 'caterpillar-code-v1';
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll([
-      '/caterpillar-code/',
-      '/caterpillar-code/index.html',
-      '/caterpillar-code/manifest.json',
-      '/caterpillar-code/icon-512.png',
-    ]))
+    caches.open(CACHE_NAME).then((cache) =>
+      cache.addAll([
+        '/caterpillar-code/',
+        '/caterpillar-code/index.html',
+        '/caterpillar-code/manifest.json',
+        '/caterpillar-code/icon-512.png',
+      ]).catch(() => {})
+    )
   );
 });
 
