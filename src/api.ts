@@ -172,10 +172,10 @@ export async function syncBuiltinProgress(
 
 // ——— Builtin completions ———
 
-export async function fetchBuiltinCompletions(userId: string): Promise<{ level_index: number; stars: number; best_length: number }[]> {
+export async function fetchBuiltinCompletions(userId: string): Promise<{ level_index: number; stars: number; best_length: number; expression: string | null }[]> {
   const { data, error } = await db()
     .from('builtin_completions')
-    .select('level_index, stars, best_length')
+    .select('level_index, stars, best_length, expression')
     .eq('user_id', userId);
   if (error) return [];
   return data;

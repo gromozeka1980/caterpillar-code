@@ -394,6 +394,45 @@ function shareProgress(btn: HTMLElement) {
 
 // ——— Sync localStorage progress to Supabase ———
 
+async function loadProgressFromServer() {
+  if (!isSignedIn()) return;
+  const user = getUser()!;
+  try {
+    const completions = await api.fetchBuiltinCompletions(user.id);
+    let changed = false;
+    for (const c of completions) {
+      const existing = state.progress.get(c.level_index);
+      const serverStars = c.stars;
+      const serverLength = c.best_length;
+      if (!existing || !existing.passed) {
+        // Server has progress that local doesn't
+        state.progress.set(c.level_index, {
+          passed: true,
+          stars: serverStars,
+          bestLength: serverLength,
+          bestExpression: c.expression ?? undefined,
+        });
+        changed = true;
+      } else {
+        // Merge: take best of both
+        const bestStars = Math.max(existing.stars, serverStars);
+        const bestLength = Math.min(existing.bestLength ?? Infinity, serverLength || Infinity);
+        if (bestStars > existing.stars || bestLength < (existing.bestLength ?? Infinity)) {
+          state.progress.set(c.level_index, {
+            ...existing,
+            stars: bestStars,
+            bestLength: bestLength === Infinity ? existing.bestLength : bestLength,
+          });
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      saveProgress();
+    }
+  } catch { /* ignore */ }
+}
+
 async function syncProgressToServer() {
   if (!isSignedIn()) return;
   const completions: { level_index: number; stars: number; best_length: number; expression?: string }[] = [];
@@ -1944,16 +1983,19 @@ export async function init() {
   await initAuth();
 
   // Re-render menu when auth state changes (e.g. after OAuth redirect)
-  setAuthChangeCallback(() => {
-    if (isSignedIn() && state.progress.size > 0) {
-      syncProgressToServer();
+  setAuthChangeCallback(async () => {
+    if (isSignedIn()) {
+      await loadProgressFromServer();
+      if (state.progress.size > 0) syncProgressToServer();
     }
     if (state.screen === 'menu') renderMenu();
+    else if (state.screen === 'chooser') renderChooser();
   });
 
-  // Sync localStorage progress to server on sign-in
-  if (isSignedIn() && state.progress.size > 0) {
-    syncProgressToServer();
+  // Load server progress and sync local → server on sign-in
+  if (isSignedIn()) {
+    await loadProgressFromServer();
+    if (state.progress.size > 0) syncProgressToServer();
   }
 
   if (!tryShowSharedProgress()) {
