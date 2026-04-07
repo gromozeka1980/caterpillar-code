@@ -1,11 +1,16 @@
 import { supabase, type CommunityLevel, type Profile, type Solution } from './supabase';
 
+function db() {
+  if (!supabase) throw new Error('Not connected');
+  return supabase;
+}
+
 // ——— Levels ———
 
 export type LevelSort = 'newest' | 'top' | 'popular';
 
 export async function fetchLevels(sort: LevelSort = 'newest', limit = 20, offset = 0): Promise<CommunityLevel[]> {
-  let query = supabase
+  let query = db()
     .from('levels')
     .select('*, author:profiles!author_id(id, username, avatar_url)')
     .eq('status', 'active')
@@ -29,7 +34,7 @@ export async function fetchLevels(sort: LevelSort = 'newest', limit = 20, offset
 }
 
 export async function fetchLevel(id: string): Promise<CommunityLevel | null> {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('levels')
     .select('*, author:profiles!author_id(id, username, avatar_url)')
     .eq('id', id)
@@ -46,7 +51,7 @@ export async function createLevel(level: {
   valid_count: number;
   author_best_length: number;
 }): Promise<CommunityLevel> {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('levels')
     .insert(level)
     .select()
@@ -56,13 +61,13 @@ export async function createLevel(level: {
 }
 
 export async function incrementPlayCount(levelId: string): Promise<void> {
-  await supabase.rpc('increment_play_count', { level_id: levelId });
+  await db().rpc('increment_play_count', { level_id: levelId });
 }
 
 // ——— Solutions ———
 
 export async function submitSolution(levelId: string, expression: string, codeLength: number): Promise<void> {
-  const { error } = await supabase
+  const { error } = await db()
     .from('solutions')
     .upsert(
       { level_id: levelId, expression, code_length: codeLength },
@@ -72,7 +77,7 @@ export async function submitSolution(levelId: string, expression: string, codeLe
 }
 
 export async function fetchMySolution(levelId: string): Promise<Solution | null> {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('solutions')
     .select('*')
     .eq('level_id', levelId)
@@ -82,7 +87,7 @@ export async function fetchMySolution(levelId: string): Promise<Solution | null>
 }
 
 export async function fetchLevelSolveCount(levelId: string): Promise<number> {
-  const { count, error } = await supabase
+  const { count, error } = await db()
     .from('solutions')
     .select('*', { count: 'exact', head: true })
     .eq('level_id', levelId);
@@ -93,7 +98,7 @@ export async function fetchLevelSolveCount(levelId: string): Promise<number> {
 // ——— Ratings ———
 
 export async function rateLevel(levelId: string, value: 1 | -1): Promise<void> {
-  const { error } = await supabase
+  const { error } = await db()
     .from('ratings')
     .upsert(
       { level_id: levelId, value },
@@ -103,7 +108,7 @@ export async function rateLevel(levelId: string, value: 1 | -1): Promise<void> {
 }
 
 export async function removeRating(levelId: string): Promise<void> {
-  const { error } = await supabase
+  const { error } = await db()
     .from('ratings')
     .delete()
     .eq('level_id', levelId);
@@ -111,7 +116,7 @@ export async function removeRating(levelId: string): Promise<void> {
 }
 
 export async function fetchMyRating(levelId: string): Promise<number | null> {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('ratings')
     .select('value')
     .eq('level_id', levelId)
@@ -123,7 +128,7 @@ export async function fetchMyRating(levelId: string): Promise<number | null> {
 // ——— Profiles ———
 
 export async function fetchProfile(userId: string): Promise<Profile | null> {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('profiles')
     .select('*')
     .eq('id', userId)
@@ -133,17 +138,17 @@ export async function fetchProfile(userId: string): Promise<Profile | null> {
 }
 
 export async function updateUsername(username: string): Promise<void> {
-  const { error } = await supabase
+  const { error } = await db()
     .from('profiles')
     .update({ username })
-    .eq('id', (await supabase.auth.getUser()).data.user?.id);
+    .eq('id', (await db().auth.getUser()).data.user?.id);
   if (error) throw error;
 }
 
 // ——— Leaderboard ———
 
 export async function fetchLeaderboard(limit = 20): Promise<Profile[]> {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('profiles')
     .select('*')
     .order('builtin_stars', { ascending: false })
@@ -159,7 +164,7 @@ export async function syncBuiltinProgress(
   completions: { level_index: number; stars: number; best_length: number; expression?: string }[]
 ): Promise<void> {
   if (completions.length === 0) return;
-  const { error } = await supabase
+  const { error } = await db()
     .from('builtin_completions')
     .upsert(completions, { onConflict: 'user_id,level_index' });
   if (error) throw error;
@@ -168,7 +173,7 @@ export async function syncBuiltinProgress(
 // ——— Builtin completions ———
 
 export async function fetchBuiltinCompletions(userId: string): Promise<{ level_index: number; stars: number; best_length: number }[]> {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('builtin_completions')
     .select('level_index, stars, best_length')
     .eq('user_id', userId);
@@ -179,9 +184,9 @@ export async function fetchBuiltinCompletions(userId: string): Promise<{ level_i
 // ——— My level count (for auto-naming) ———
 
 export async function fetchMyLevelCount(): Promise<number> {
-  const userId = (await supabase.auth.getUser()).data.user?.id;
+  const userId = (await db().auth.getUser()).data.user?.id;
   if (!userId) return 0;
-  const { count, error } = await supabase
+  const { count, error } = await db()
     .from('levels')
     .select('*', { count: 'exact', head: true })
     .eq('author_id', userId)
@@ -193,7 +198,7 @@ export async function fetchMyLevelCount(): Promise<number> {
 // ——— Check duplicate canonical signature ———
 
 export async function checkDuplicate(canonicalSignature: string): Promise<CommunityLevel | null> {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('levels')
     .select('id, title')
     .eq('canonical_signature', canonicalSignature)

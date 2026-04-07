@@ -1,9 +1,12 @@
 import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
-export const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+export const supabase: SupabaseClient | null =
+  SUPABASE_URL && SUPABASE_ANON_KEY
+    ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    : null;
 
 let currentUser: User | null = null;
 
@@ -15,7 +18,12 @@ export function isSignedIn(): boolean {
   return currentUser !== null;
 }
 
+export function isSupabaseAvailable(): boolean {
+  return supabase !== null;
+}
+
 export async function initAuth(): Promise<User | null> {
+  if (!supabase) return null;
   const { data: { session } } = await supabase.auth.getSession();
   currentUser = session?.user ?? null;
 
@@ -27,6 +35,7 @@ export async function initAuth(): Promise<User | null> {
 }
 
 export async function signInWithGitHub() {
+  if (!supabase) return;
   await supabase.auth.signInWithOAuth({
     provider: 'github',
     options: { redirectTo: window.location.origin + window.location.pathname },
@@ -34,6 +43,7 @@ export async function signInWithGitHub() {
 }
 
 export async function signInWithGoogle() {
+  if (!supabase) return;
   await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: { redirectTo: window.location.origin + window.location.pathname },
@@ -41,6 +51,7 @@ export async function signInWithGoogle() {
 }
 
 export async function signOut() {
+  if (!supabase) return;
   await supabase.auth.signOut();
   currentUser = null;
 }
