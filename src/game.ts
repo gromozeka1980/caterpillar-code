@@ -1809,6 +1809,14 @@ async function showLeaderboard() {
       return;
     }
 
+    // Column headers
+    const header = el('div', 'lb-row lb-header');
+    header.appendChild(el('span', 'lb-rank', ''));
+    header.appendChild(el('span', 'lb-name', 'Player'));
+    header.appendChild(el('span', 'lb-stars', 'Campaign'));
+    header.appendChild(el('span', 'lb-community', 'Community'));
+    content.appendChild(header);
+
     for (let i = 0; i < players.length; i++) {
       const p = players[i];
       const row = el('div', 'lb-row');
@@ -1827,9 +1835,11 @@ async function showLeaderboard() {
       row.appendChild(name);
 
       const stars = el('span', 'lb-stars', `${p.builtin_stars} \u2605`);
+      stars.title = 'Campaign stars (built-in levels)';
       row.appendChild(stars);
 
-      const community = el('span', 'lb-community', `${p.community_solved} solved`);
+      const community = el('span', 'lb-community', `${p.community_solved} \u2714`);
+      community.title = 'Community levels solved';
       row.appendChild(community);
 
       content.appendChild(row);

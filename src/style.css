@@ -1534,6 +1534,22 @@ html, body {
   border-bottom: 1px solid rgba(255,255,255,0.04);
 }
 
+.lb-header {
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  padding-bottom: 6px;
+  margin-bottom: 2px;
+}
+
+.lb-header .lb-name,
+.lb-header .lb-stars,
+.lb-header .lb-community {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
 .lb-rank {
   font-size: 0.85rem;
   font-weight: 700;
