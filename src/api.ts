@@ -164,9 +164,10 @@ export async function syncBuiltinProgress(
   completions: { level_index: number; stars: number; best_length: number; expression?: string }[]
 ): Promise<void> {
   if (completions.length === 0) return;
+  const rows = completions.map(c => ({ ...c, game_mode: 'code' }));
   const { error } = await db()
     .from('builtin_completions')
-    .upsert(completions, { onConflict: 'user_id,level_index' });
+    .upsert(rows, { onConflict: 'user_id,level_index,game_mode' });
   if (error) throw error;
 }
 
@@ -176,7 +177,8 @@ export async function fetchBuiltinCompletions(userId: string): Promise<{ level_i
   const { data, error } = await db()
     .from('builtin_completions')
     .select('level_index, stars, best_length, expression')
-    .eq('user_id', userId);
+    .eq('user_id', userId)
+    .eq('game_mode', 'code');
   if (error) return [];
   return data;
 }
